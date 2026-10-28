@@ -1,6 +1,6 @@
-# Postura desde vídeo · PoC Vítaly
+# Postura desde vídeo · PoC
 
-Prueba de concepto de la **Fase 1 (percepción)** del modelo biomecánico de Vítaly. A partir de un vídeo grabado con el móvil, la web:
+Prueba de concepto de la **Fase 1 (percepción)** de un modelo biomecánico. A partir de un vídeo grabado con el móvil, la web:
 
 1. Estima la **postura fotograma a fotograma**: 33 puntos clave en 2D y 3D (MediaPipe Pose Landmarker).
 2. Dibuja el **esqueleto sobre el vídeo** y en un **visor 3D** que se puede girar.

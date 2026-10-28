@@ -1,6 +1,6 @@
 # Análisis de librerías para la estimación de postura
 
-*Modelo biomecánico Vítaly · Fase 1 (percepción) · octubre de 2026*
+*Modelo biomecánico · Fase 1 (percepción) · octubre de 2026*
 
 ## Qué necesitamos en esta fase
 
@@ -12,7 +12,7 @@
 
 ## Comparativa
 
-| Librería / modelo | Puntos clave | 3D | ¿En el navegador? | Licencia | Valoración para Vítaly |
+| Librería / modelo | Puntos clave | 3D | ¿En el navegador? | Licencia | Valoración |
 |---|---|---|---|---|---|
 | **MediaPipe Pose Landmarker** (BlazePose, Google) | 33 (cuerpo, pies, esbozo de manos) | Sí, "world landmarks" en metros (estimación monocular) | **Sí**, WASM + GPU (WebGL), móvil y PC | Apache 2.0 | **Elegida para la PoC.** Madura, ligera, con mantenimiento activo y tres tamaños (lite, full, heavy). |
 | **RTMPose / RTMW / RTMW3D** (MMPose, vía `rtmlib`) | 17 / 26 / **133** (cuerpo completo con manos y cara) | RTMW3D sí | Posible exportando a ONNX + `onnxruntime-web` (WebGPU), con trabajo de integración | Apache 2.0 | **Candidata para la siguiente iteración**: más precisa y con manos (muñeca para RULA). Opción natural en servidor (Python). |
