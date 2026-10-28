@@ -16,12 +16,20 @@ export const hasApiKey = () => apiKey != null;
 
 const headers = (extra = {}) => ({ 'x-goog-api-key': apiKey, ...extra });
 
+// Google devuelve el error como objeto o como lista de un objeto: [{ "error": {...} }].
 async function apiError(res) {
-  let msg = `${res.status} ${res.statusText}`;
+  let msg = `${res.status}`;
+  const text = await res.text().catch(() => '');
   try {
-    const j = await res.json();
-    if (j.error?.message) msg = j.error.message;
-  } catch { /* respuesta sin JSON */ }
+    const j = JSON.parse(text);
+    const err = (Array.isArray(j) ? j[0] : j)?.error;
+    if (err?.message) {
+      const reason = err.details?.find((d) => d.reason)?.reason;
+      msg = `${res.status} ${err.status || ''}${reason ? ` (${reason})` : ''}: ${err.message}`;
+    }
+  } catch {
+    if (text) msg = `${res.status}: ${text.slice(0, 300)}`;
+  }
   const e = new Error(msg);
   e.status = res.status;
   return e;
