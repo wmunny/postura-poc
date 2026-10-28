@@ -6,7 +6,7 @@ Prueba de concepto de la **Fase 1 (percepción)** del modelo biomecánico de Ví
 2. Dibuja el **esqueleto sobre el vídeo** y en un **visor 3D** que se puede girar.
 3. Calcula los **ángulos articulares** de tronco, cuello, hombros, codos, caderas y rodillas, en dos modos: plano de imagen (2D) o estimación 3D.
 4. Muestra la **evolución temporal** de cada ángulo y un **resumen estadístico** (media, mediana, P95, mínimo, máximo y cobertura).
-5. **Exporta** los ángulos (CSV), los puntos clave (CSV) y los datos completos (JSON, formato `vitaly-postura/v1`) para las fases siguientes (REBA, RULA, OWAS, NIOSH, OpenSim…).
+5. **Exporta** los ángulos (CSV), los puntos clave (CSV) y los datos completos (JSON, formato `postura/v1`) para las fases siguientes (REBA, RULA, OWAS, NIOSH, OpenSim…).
 
 **Todo se procesa en el navegador.** El vídeo no se sube a ningún servidor.
 
@@ -14,15 +14,15 @@ Prueba de concepto de la **Fase 1 (percepción)** del modelo biomecánico de Ví
 
 ## Publicar en GitHub Pages
 
-1. Crea un repositorio, por ejemplo `vitaly-postura-poc`, y sube el contenido de esta carpeta a la rama `main`:
+1. Crea un repositorio, por ejemplo `postura-poc`, y sube el contenido de esta carpeta a la rama `main`:
    ```bash
    git init && git add . && git commit -m "PoC postura desde vídeo"
    git branch -M main
-   git remote add origin https://github.com/<organizacion>/vitaly-postura-poc.git
+   git remote add origin https://github.com/<organizacion>/postura-poc.git
    git push -u origin main
    ```
 2. En GitHub, ve a **Settings › Pages › Build and deployment** y elige *Source: Deploy from a branch*, rama `main` y carpeta `/ (root)`.
-3. En uno o dos minutos estará en `https://<organizacion>.github.io/vitaly-postura-poc/`.
+3. En uno o dos minutos estará en `https://<organizacion>.github.io/postura-poc/`.
 
 GitHub Pages sirve por HTTPS, que es lo que necesita el móvil para abrir la cámara desde el botón *Grabar con el móvil*.
 
@@ -82,7 +82,7 @@ Todos los ángulos están en grados y sin signo; 0° corresponde a la postura ne
 
 Un ángulo se descarta (aparece como vacío) si alguno de sus puntos tiene una visibilidad inferior a 0,5.
 
-## Formato de los datos (`vitaly-postura/v1`)
+## Formato de los datos (`postura/v1`)
 
 ```json
 {

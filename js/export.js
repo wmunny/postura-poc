@@ -39,7 +39,7 @@ export function exportLandmarksCSV(meta, frames) {
 
 export function exportJSON(meta, frames) {
   const payload = {
-    formato: 'vitaly-postura/v1',
+    formato: 'postura/v1',
     descripcion: 'lm: [x,y,z,visibilidad] normalizados a la imagen (0-1). wlm: [x,y,z,visibilidad] en metros, origen en el centro de la cadera (MediaPipe world landmarks).',
     landmarks: LANDMARK_NAMES,
     meta,

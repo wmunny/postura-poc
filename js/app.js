@@ -113,7 +113,7 @@ $('#btn-analyze').addEventListener('click', async () => {
       delegate,
       tiempoProceso_s: Math.round(secs * 10) / 10,
       fecha: new Date().toISOString(),
-      app: `vitaly-postura-poc ${APP_VERSION}`,
+      app: `postura-poc ${APP_VERSION}`,
       tasksVision: CONFIG.tasksVisionVersion,
       userAgent: navigator.userAgent,
     };

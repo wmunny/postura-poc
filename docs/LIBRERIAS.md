@@ -30,7 +30,7 @@
 
 - Es la única opción que cumple a la vez todos estos requisitos: **funciona en el navegador del móvil, da puntos 3D, cubre pies y tobillos, tiene licencia comercial y está mantenida**.
 - La PoC se publica tal cual en GitHub Pages, sin servidor ni coste de infraestructura.
-- La salida (formato `vitaly-postura/v1`, en JSON o CSV) es **independiente del motor**. Si mañana cambiamos a RTMW o a un backend en Python, las fases siguientes (métodos de evaluación, OpenSim) no cambian.
+- La salida (formato `postura/v1`, en JSON o CSV) es **independiente del motor**. Si mañana cambiamos a RTMW o a un backend en Python, las fases siguientes (métodos de evaluación, OpenSim) no cambian.
 
 ## Limitaciones que hay que tener presentes
 
