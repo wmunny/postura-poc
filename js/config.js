@@ -2,7 +2,7 @@
 // Para no depender de CDNs externos (redes corporativas, uso offline), ejecuta
 // `scripts/descargar-dependencias.sh` y pon USE_LOCAL_ASSETS = true.
 
-export const APP_VERSION = '0.2.1';
+export const APP_VERSION = '0.3.0';
 
 const USE_LOCAL_ASSETS = false;
 const TASKS_VISION_VERSION = '1.1.1';

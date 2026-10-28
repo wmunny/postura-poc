@@ -19,8 +19,16 @@ Prueba de concepto de la **Fase 1 (percepción)** de un modelo biomecánico. A p
 | Escenario | Qué hace | Dónde se ejecuta |
 |---|---|---|
 | **A · MediaPipe** | Serie densa de ángulos (10–30 por segundo), con o sin filtros anti-oclusión | Navegador |
-| **B · Argon solo** | Gemini 4 Argon ve el vídeo y estima los ángulos y el contexto de la tarea | API de Gemini |
+| **B · Argon solo** | Gemini 4 Argon marca las articulaciones en cada fotograma que muestrea, estima los ángulos 3D y describe el contexto de la tarea | API de Gemini |
 | **C · Mixto** | Argon ve el vídeo y la serie de A, marca los tramos implausibles, propone correcciones y aporta contexto | Navegador + API de Gemini |
+
+### Esqueleto de Argon
+
+En el escenario B, Argon devuelve la posición 2D de 14 articulaciones (orejas, hombros, codos, muñecas, caderas, rodillas y tobillos) en cada fotograma que ve. Esos puntos se dibujan sobre el vídeo con líneas discontinuas y articulaciones cuadradas amarillas, junto al esqueleto de MediaPipe, y cada uno se puede ocultar. Así se ve qué percibe Argon de verdad: si sitúa un codo en la pared, no lo ha localizado.
+
+- En **2D**, los ángulos de B se calculan con nuestro código a partir de esos puntos, con las mismas definiciones que en A.
+- En **3D**, son los ángulos anatómicos que estima Argon directamente.
+- Argon solo ve unos pocos fotogramas por segundo (el muestreo elegido). Cada esqueleto se mantiene hasta la muestra siguiente, y en la esquina se indica el instante que vio.
 
 En las gráficas, la línea tenue es la referencia: en A, la serie sin filtrar; en B y C, el escenario A. La tabla *Comparativa de escenarios* muestra medias, P95, cobertura y la diferencia media con A.
 

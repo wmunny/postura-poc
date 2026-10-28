@@ -27,14 +27,23 @@ function contentRect(video, w, h) {
 
 const sideColor = (s) => (s === 'C' ? css('--skeleton-c') : css(`--side-${s}`));
 
-export function drawOverlay(canvas, video, frame) {
+/**
+ * Esqueletos sobre el vídeo: el de MediaPipe (`frame`) y, si se pasa, el de Argon (`argon`, con
+ * el formato de MediaPipe). El de Argon va con líneas discontinuas y articulaciones cuadradas.
+ */
+export function drawOverlay(canvas, video, frame, { showMP = true, argon = null } = {}) {
   const { ctx, w, h } = fitCanvas(canvas);
-  if (!frame?.lm) return;
   const r = contentRect(video, w, h);
-  const P = frame.lm.map((p) => [r.x + p[0] * r.w, r.y + p[1] * r.h, p[3]]);
   const lw = Math.max(2, Math.min(4, r.w / 250));
-
   ctx.lineCap = 'round';
+  if (showMP && frame?.lm) drawMediaPipe(ctx, r, frame, lw);
+  if (argon) drawArgon(ctx, r, argon, lw);
+  ctx.globalAlpha = 1;
+  ctx.setLineDash([]);
+}
+
+function drawMediaPipe(ctx, r, frame, lw) {
+  const P = frame.lm.map((p) => [r.x + p[0] * r.w, r.y + p[1] * r.h, p[3]]);
   for (const [a, b, s] of CONNECTIONS) {
     const vis = Math.min(P[a][2], P[b][2]) >= VISIBILITY_THRESHOLD;
     ctx.globalAlpha = vis ? 0.95 : 0.25;
@@ -49,7 +58,39 @@ export function drawOverlay(canvas, video, frame) {
     ctx.fillStyle = '#ffffff'; ctx.fill();
     ctx.lineWidth = 1.5; ctx.strokeStyle = '#111'; ctx.stroke();
   }
+}
+
+// Argon solo da orejas, hombros, codos, muñecas, caderas, rodillas y tobillos.
+const ARGON_LINKS = [
+  [11, 12, 'C'], [11, 23, 'L'], [12, 24, 'R'], [23, 24, 'C'],
+  [11, 13, 'L'], [13, 15, 'L'], [12, 14, 'R'], [14, 16, 'R'],
+  [23, 25, 'L'], [25, 27, 'L'], [24, 26, 'R'], [26, 28, 'R'],
+];
+
+function drawArgon(ctx, r, pose, lw) {
+  const P = pose.lm.map((p) => [r.x + p[0] * r.w, r.y + p[1] * r.h, p[3] > 0]);
   ctx.globalAlpha = 1;
+  ctx.setLineDash([lw * 2.5, lw * 2]);
+  for (const [a, b, s] of ARGON_LINKS) {
+    if (!P[a][2] || !P[b][2]) continue;
+    for (const [color, width] of [['#000', lw + 3], [s === 'C' ? css('--argon') : sideColor(s), lw]]) {
+      ctx.strokeStyle = color; ctx.lineWidth = width;
+      ctx.beginPath(); ctx.moveTo(P[a][0], P[a][1]); ctx.lineTo(P[b][0], P[b][1]); ctx.stroke();
+    }
+  }
+  ctx.setLineDash([]);
+  const half = lw * 1.6;
+  for (const i of [7, 8, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28]) {
+    if (!P[i][2]) continue;
+    ctx.fillStyle = css('--argon'); ctx.fillRect(P[i][0] - half, P[i][1] - half, half * 2, half * 2);
+    ctx.lineWidth = 1.5; ctx.strokeStyle = '#000'; ctx.strokeRect(P[i][0] - half, P[i][1] - half, half * 2, half * 2);
+  }
+  // Instante del fotograma que vio Argon: el esqueleto se mantiene hasta la muestra siguiente.
+  const label = `Argon · ${pose.t.toFixed(2)} s`;
+  ctx.font = '600 12px system-ui, sans-serif';
+  const tw = ctx.measureText(label).width;
+  ctx.fillStyle = 'rgba(0,0,0,0.65)'; ctx.fillRect(r.x + 8, r.y + 8, tw + 14, 22);
+  ctx.fillStyle = css('--argon'); ctx.fillText(label, r.x + 15, r.y + 23);
 }
 
 /** Visor 3D ortográfico con rotación por arrastre. */

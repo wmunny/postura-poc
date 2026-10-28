@@ -116,6 +116,11 @@
           </div>
         </aside>
       </div>
+      <div class="overlay-opts">
+        <label class="check"><input type="checkbox" id="show-mp" checked> Esqueleto de MediaPipe</label>
+        <label class="check" title="Ejecuta el escenario B para verlo"><input type="checkbox" id="show-argon" disabled> <span class="dash"></span>Esqueleto de Argon</label>
+        <p class="micro" id="argon-skel-note">Ejecuta el escenario B para ver dónde sitúa Argon cada articulación.</p>
+      </div>
 
       <div class="controls compact">
         <div class="seg" role="group" aria-label="Escenario">
@@ -178,7 +183,7 @@
       <div class="scenarios">
         <div class="scenario">
           <h3>B · Argon solo</h3>
-          <p>Argon ve el vídeo y estima los ángulos por su cuenta, sin MediaPipe. Aporta además el contexto de la tarea.</p>
+          <p>Argon ve el vídeo, marca dónde está cada articulación en cada fotograma que muestrea (se dibuja sobre el vídeo) y estima los ángulos por su cuenta, sin MediaPipe. Aporta además el contexto de la tarea.</p>
         </div>
         <div class="scenario">
           <h3>C · Mixto</h3>

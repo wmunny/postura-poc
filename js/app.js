@@ -6,7 +6,7 @@ import { AngleChart } from './charts.js';
 import { drawOverlay, Viewer3D } from './render.js';
 import { exportAnglesCSV, exportLandmarksCSV, exportJSON } from './export.js';
 import { setApiKey, hasApiKey } from './gemini.js';
-import { runB, runC, viewB, viewC } from './argon.js';
+import { runB, runC, viewB, viewC, argonFrames, argonPoseAt } from './argon.js';
 
 const $ = (s) => document.querySelector(s);
 const video = $('#video');
@@ -24,6 +24,7 @@ const state = {
   scenario: 'A',
   views: {},          // A, B, C: { times, series, ... }
   argon: { B: null, C: null },
+  argonPoses: null,   // puntos 2D de Argon (escenario B) con el formato de MediaPipe
   computed: null,     // vista activa
   charts: [],
   abort: null,
@@ -200,7 +201,7 @@ function recompute() {
     smoothWindow: state.smooth, filtros: state.filtros,
   });
   state.views = { A };
-  if (state.argon.B) state.views.B = viewB(state.argon.B, A.times);
+  if (state.argon.B) state.views.B = viewB(state.argon.B, A.times, { mode: state.mode, width: state.meta.width, height: state.meta.height });
   if (state.argon.C) state.views.C = viewC(state.argon.C, A);
   if (!state.views[state.scenario]) state.scenario = 'A';
   document.querySelectorAll('[data-scenario]').forEach((b) => {
@@ -221,7 +222,9 @@ function recompute() {
 function renderGhostNote() {
   const notes = {
     A: state.filtros ? 'Línea tenue: MediaPipe sin filtrar. Lo que ves por encima es lo que queda tras los filtros.' : '',
-    B: 'Línea tenue: escenario A (MediaPipe). Los ángulos de Argon son anatómicos en 3D: compáralos con el modo «Ángulos 3D».',
+    B: state.mode === '2d'
+      ? 'Línea tenue: escenario A (MediaPipe). En 2D, los ángulos de B se calculan con los puntos que Argon marca en cada fotograma (el esqueleto amarillo del vídeo).'
+      : 'Línea tenue: escenario A (MediaPipe). En 3D, son los ángulos anatómicos que estima Argon directamente.',
     C: 'Línea tenue: escenario A antes de la revisión de Argon.',
   };
   let note = notes[state.scenario];
@@ -313,7 +316,9 @@ function syncToVideo() {
   const t = video.currentTime;
   const i = frameIndexAt(t);
   const frame = state.frames[i];
-  drawOverlay(overlay, video, frame);
+  const argon = state.argonPoses && $('#show-argon').checked
+    ? argonPoseAt(state.argonPoses, state.argon.B.fps, t) : null;
+  drawOverlay(overlay, video, frame, { showMP: $('#show-mp').checked, argon });
   viewer.setFrame(frame);
   state.charts.forEach((c) => c.setPlayhead(t));
   $('#cur-time').textContent = `· ${t.toFixed(2)} s`;
@@ -358,6 +363,8 @@ document.querySelectorAll('[data-scenario]').forEach((b) => b.addEventListener('
 }));
 $('#smooth').addEventListener('change', (e) => { state.smooth = Number(e.target.value); recompute(); });
 $('#filters').addEventListener('change', (e) => { state.filtros = e.target.checked; recompute(); });
+$('#show-mp').addEventListener('change', syncToVideo);
+$('#show-argon').addEventListener('change', syncToVideo);
 
 // ---------- 4. Escenarios B y C (Gemini 4 Argon) ----------
 function argonStatus(msg, isError = false) {
@@ -369,6 +376,10 @@ function argonStatus(msg, isError = false) {
 function resetArgon() {
   state.argonAbort?.abort();
   state.argon = { B: null, C: null };
+  state.argonPoses = null;
+  $('#show-argon').checked = false;
+  $('#show-argon').disabled = true;
+  $('#argon-skel-note').textContent = 'Ejecuta el escenario B para ver dónde sitúa Argon cada articulación.';
   state.scenario = 'A';
   for (const k of ['B', 'C']) { $(`#context-${k}`).hidden = true; $(`#context-${k}`).innerHTML = ''; }
   argonStatus('');
@@ -397,6 +408,7 @@ async function runArgon(kind) {
   try {
     const r = kind === 'B' ? await runB(args) : await runC({ ...args, base: state.views.A, mode: state.mode });
     state.argon[kind] = r;
+    if (kind === 'B') showArgonSkeleton(r);
     state.scenario = kind;
     recompute();
     renderContext(kind);
@@ -411,7 +423,7 @@ async function runArgon(kind) {
         : err.status === 404 ? ` El modelo ${GEMINI.modelo} no está disponible para esta clave.`
         : err.status === 429 ? ' Se ha superado la cuota; espera un poco o revisa el plan.'
         : '';
-      argonStatus(`Error de Gemini: ${err.message}.${hint}`, true);
+      argonStatus(`Error de Gemini: ${err.message.replace(/\.$/, '')}.${hint}`, true);
     }
   } finally {
     $('#btn-run-b').disabled = $('#btn-run-c').disabled = false;
@@ -421,6 +433,17 @@ async function runArgon(kind) {
 $('#btn-run-b').addEventListener('click', () => runArgon('B'));
 $('#btn-run-c').addEventListener('click', () => runArgon('C'));
 $('#btn-argon-cancel').addEventListener('click', () => state.argonAbort?.abort());
+
+function showArgonSkeleton(r) {
+  state.argonPoses = argonFrames(r);
+  const n = state.argonPoses.length;
+  const marked = state.argonPoses.reduce((a, f) => a + f.lm.filter((p) => p[3] > 0).length, 0);
+  $('#show-argon').disabled = false;
+  $('#show-argon').checked = true;
+  $('#argon-skel-note').textContent = n
+    ? `${n} fotogramas vistos por Argon · ${Math.round((100 * marked) / (n * 14))} % de las articulaciones situadas. Cada esqueleto se mantiene hasta la muestra siguiente; pausa el vídeo para comparar.`
+    : 'Argon no ha devuelto puntos.';
+}
 
 const fmtT = (t) => `<button class="tlink" type="button" data-t="${Number(t) || 0}">${(Number(t) || 0).toFixed(1)} s</button>`;
 const span = (x) => `${fmtT(x.inicio)}–${(Number(x.fin) || 0).toFixed(1)} s`;

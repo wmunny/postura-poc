@@ -9,7 +9,8 @@ El objetivo final es una **skill** que un asistente (Gemini, Claude u otro con M
 | # | Paso | Estado |
 |---|---|---|
 | 1 | Filtros anti-oclusión en la serie de MediaPipe | Hecho (v0.2) |
-| 2 | Escenarios A · B · C (MediaPipe, Gemini 4 Argon, mixto) | Hecho (v0.2), pendiente de probar con la API real |
+| 2 | Escenarios A · B · C (MediaPipe, Gemini 4 Argon, mixto) | Hecho (v0.2); probado con la API real |
+| 2b | Esqueleto de Argon sobre el vídeo (puntos 2D por fotograma) | Hecho (v0.3), pendiente de probar con la API real |
 | 3 | Validación de los escenarios frente a una referencia | Pendiente |
 | 4 | Módulo `ergo`: REBA, RULA y OWAS | Pendiente |
 | 5 | Motor sin interfaz (Python) | Pendiente |
@@ -36,6 +37,12 @@ La app muestra cuántos fotogramas descarta cada filtro y dibuja la serie sin fi
 - **C · Mixto**: Argon ve el vídeo y la serie de A, marca los tramos implausibles, propone correcciones y aporta contexto.
 
 La clave de la API se pide al arrancar y solo vive en la memoria de la pestaña.
+
+## 2b. Esqueleto de Argon (hecho)
+
+Argon no reconstruye el movimiento: ve unos pocos fotogramas por segundo y responde con números. Para comprobar qué percibe, en B se le piden los puntos 2D de 14 articulaciones en cada fotograma, que se dibujan sobre el vídeo junto al esqueleto de MediaPipe. En 2D, los ángulos de B se calculan a partir de esos puntos con el mismo código que A.
+
+Primera observación con el vídeo de prueba: en el accionamiento del cuadro eléctrico (12–17 s) el brazo izquierdo está de verdad por encima de la cabeza, y los ~155° de MediaPipe son en buena parte reales. Hay que revisar si los filtros descartan ahí datos válidos.
 
 ## 3. Validación (siguiente)
 

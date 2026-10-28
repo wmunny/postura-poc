@@ -14,6 +14,7 @@
   --side-R: #eb6834;   /* derecha del trabajador */
   --side-C: #6250d6;   /* segmentos centrales (tronco, cuello) */
   --skeleton-c: #d9d8d2;
+  --argon: #f2c94c;     /* esqueleto de Argon */
   --warn-bg: #fff4dc;
   --warn-ink: #6b4a00;
   --radius: 12px;
@@ -225,3 +226,6 @@ dialog p { margin: 0 0 8px; }
 }
 .field input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .actions.end { justify-content: flex-end; margin-top: 16px; }
+.overlay-opts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; margin: 8px 0 0; }
+.overlay-opts .micro { margin: 0; }
+.dash { display: inline-block; width: 22px; height: 0; border-top: 3px dashed var(--argon); vertical-align: middle; margin-right: 6px; }

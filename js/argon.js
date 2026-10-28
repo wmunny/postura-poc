@@ -1,12 +1,14 @@
 // Escenarios B y C con Gemini 4 Argon.
 //
-//  B · Argon solo: el modelo ve el vídeo y estima los ángulos por su cuenta, más el contexto.
+//  B · Argon solo: el modelo ve el vídeo, marca las articulaciones en cada fotograma que muestrea
+//      (puntos 2D) y estima los ángulos 3D, más el contexto. Los ángulos 2D de B los calcula
+//      nuestro código a partir de esos puntos, igual que en A; los puntos se dibujan sobre el vídeo.
 //  C · Mixto: el modelo ve el vídeo y la serie densa de MediaPipe (escenario A). No la recalcula:
 //      marca los tramos implausibles o dudosos, propone valores corregidos y aporta contexto.
 //
 // En ambos casos el resultado se remuestrea sobre los mismos instantes que la serie de A.
 
-import { ANGLE_DEFS } from './angles.js';
+import { ANGLE_DEFS, computeSeries } from './angles.js';
 import { GEMINI } from './config.js';
 import { videoPart, interact } from './gemini.js';
 
@@ -33,10 +35,20 @@ const CONTEXTO = obj({
 });
 const OCLUSIONES = arr(tramo({ articulaciones: arr({ type: 'string', enum: IDS }), motivo: str }));
 
+// Puntos que se piden a Argon y su índice en MediaPipe Pose (izquierda = del trabajador).
+export const PUNTOS = {
+  oreja_izq: 7, oreja_dch: 8, hombro_izq: 11, hombro_dch: 12, codo_izq: 13, codo_dch: 14,
+  muneca_izq: 15, muneca_dch: 16, cadera_izq: 23, cadera_dch: 24,
+  rodilla_izq: 25, rodilla_dch: 26, tobillo_izq: 27, tobillo_dch: 28,
+};
+// [y, x] normalizados a 0–1000, la convención nativa de Gemini para señalar puntos.
+const punto = { type: ['array', 'null'], items: { type: 'integer' }, minItems: 2, maxItems: 2 };
+
 const SCHEMA_B = obj({
   resumen: str,
   muestras: arr(obj({
     t: num,
+    puntos: obj(Object.fromEntries(Object.keys(PUNTOS).map((k) => [k, punto]))),
     ...Object.fromEntries(IDS.map((id) => [id, numOrNull])),
     confianza: { type: 'string', enum: ['alta', 'media', 'baja'] },
   })),
@@ -75,11 +87,15 @@ observación útil para una evaluación ergonómica (REBA, RULA, OWAS).`;
 export async function runB({ file, duration, fps, thinking, signal, onStatus }) {
   const video = await videoPart(file, { fps, signal, onStatus });
   onStatus?.('Gemini 4 Argon está analizando el vídeo…');
-  const prompt = `Eres especialista en biomecánica y ergonomía laboral. Analiza el vídeo y estima los ángulos
-articulares del trabajador a lo largo del tiempo, como ángulos anatómicos reales en 3D (no su proyección en la imagen).
-Da una muestra cada ${(1 / fps).toFixed(2)} s, desde 0 hasta ${duration.toFixed(1)} s.
+  const prompt = `Eres especialista en biomecánica y ergonomía laboral. Analiza el vídeo del trabajador.
+Da una muestra por cada fotograma que recibes (uno cada ${(1 / fps).toFixed(2)} s, desde 0 hasta ${duration.toFixed(1)} s),
+con su tiempo exacto en t. En cada muestra:
 
-Ángulos:
+1. puntos: dónde está cada articulación EN ESE FOTOGRAMA, como [y, x] normalizados a 0-1000
+   (y = 0 arriba, x = 0 a la izquierda de la imagen). Señala el centro de la articulación.
+   Si la articulación está tapada o fuera de la imagen y no puedes situarla con seguridad, usa null.
+   No la deduzcas de la postura típica: los puntos sirven para comprobar qué ves realmente.
+2. Ángulos articulares anatómicos reales en 3D (no su proyección en la imagen):
 ${DEFINICIONES}
 
 ${REGLAS}
@@ -154,11 +170,43 @@ function resample(points, times, maxGap) {
   });
 }
 
-/** Vista del escenario B sobre los instantes de A. */
-export function viewB(result, times) {
+/** Fotogramas de Argon con el formato de MediaPipe: { t, lm: 33 × [x, y, 0, visibilidad] }. */
+export function argonFrames(result) {
+  return (result.json.muestras || [])
+    .filter((m) => Number.isFinite(m.t))
+    .sort((a, b) => a.t - b.t)
+    .map((m) => {
+      const lm = Array.from({ length: 33 }, () => [0, 0, 0, 0]);
+      for (const [k, i] of Object.entries(PUNTOS)) {
+        const p = m.puntos?.[k];
+        if (Array.isArray(p) && p.length === 2 && p.every(Number.isFinite)) lm[i] = [p[1] / 1000, p[0] / 1000, 0, 1];
+      }
+      return { t: m.t, lm };
+    });
+}
+
+/** Pose de Argon más cercana a `t` (solo si está a menos de medio intervalo de muestreo). */
+export function argonPoseAt(frames, fps, t) {
+  let best = null;
+  for (const f of frames) if (!best || Math.abs(f.t - t) < Math.abs(best.t - t)) best = f;
+  return best && Math.abs(best.t - t) <= 0.5 / fps + 1e-6 ? best : null;
+}
+
+/**
+ * Vista del escenario B sobre los instantes de A.
+ * En 2D, los ángulos se calculan con nuestro código a partir de los puntos de Argon;
+ * en 3D, son los ángulos anatómicos que estima Argon.
+ */
+export function viewB(result, times, { mode, width, height }) {
   const maxGap = 2.5 / result.fps;
   const series = {};
-  for (const id of IDS) series[id] = resample(result.json.muestras.map((m) => ({ t: m.t, v: m[id] })), times, maxGap);
+  if (mode === '2d') {
+    const frames = argonFrames(result);
+    const s = computeSeries(frames, { mode: '2d', width, height }).series;
+    for (const id of IDS) series[id] = resample(frames.map((f, i) => ({ t: f.t, v: s[id][i] })), times, maxGap);
+  } else {
+    for (const id of IDS) series[id] = resample(result.json.muestras.map((m) => ({ t: m.t, v: m[id] })), times, maxGap);
+  }
   return { times, series };
 }
 
