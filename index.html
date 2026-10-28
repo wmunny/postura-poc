@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Postura desde vídeo · PoC Vítaly</title>
+  <meta name="description" content="Prueba de concepto: estimación de la postura de un trabajador a partir de un vídeo grabado con el móvil. Procesado local en el navegador.">
+  <link rel="stylesheet" href="css/styles.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='6' r='4' fill='%232a78d6'/%3E%3Cpath d='M16 11v10M16 13l-7 5M16 13l7 5M16 21l-5 9M16 21l5 9' stroke='%232a78d6' stroke-width='3' stroke-linecap='round' fill='none'/%3E%3C/svg%3E">
+</head>
+<body>
+  <header class="top">
+    <div class="wrap">
+      <div>
+        <p class="eyebrow">Modelo biomecánico Vítaly · Fase 1 · Percepción</p>
+        <h1>Postura desde vídeo</h1>
+      </div>
+      <span class="badge" title="El vídeo se analiza en este navegador; no se sube a ningún servidor.">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3Z" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+        Procesado 100&nbsp;% en tu dispositivo
+      </span>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <!-- 1. Vídeo -->
+    <section class="card" id="step-input">
+      <h2><span class="num">1</span> Vídeo</h2>
+      <div class="dropzone" id="dropzone">
+        <div class="actions">
+          <label class="btn primary">
+            <input type="file" id="file-record" accept="video/*" capture="environment" hidden>
+            Grabar con el móvil
+          </label>
+          <label class="btn">
+            <input type="file" id="file-pick" accept="video/*" hidden>
+            Elegir un vídeo
+          </label>
+        </div>
+        <p class="hint">o arrástralo aquí · MP4 / MOV / WebM</p>
+        <p class="file-name" id="file-name" hidden></p>
+      </div>
+      <details class="tips">
+        <summary>Cómo grabar para obtener buenos ángulos</summary>
+        <ul>
+          <li>Móvil <strong>en vertical u horizontal pero recto y estable</strong> (trípode o apoyado). La vertical de la cámara se usa como referencia.</li>
+          <li>Cámara <strong>perpendicular al plano del movimiento</strong>: de lado para flexión de tronco, cadera y rodilla; de frente para inclinaciones laterales.</li>
+          <li>El trabajador <strong>entero en el encuadre</strong> (de la cabeza a los pies), a 3–5 m, con buena luz y sin contraluz.</li>
+          <li>Una sola persona en plano. Ropa que no oculte articulaciones.</li>
+          <li>10–60 s son suficientes para una tarea cíclica.</li>
+        </ul>
+      </details>
+    </section>
+
+    <!-- 2. Análisis -->
+    <section class="card" id="step-analyze">
+      <h2><span class="num">2</span> Análisis</h2>
+      <div class="controls">
+        <label>Modelo
+          <select id="model">
+            <option value="lite">Lite · rápido (móviles modestos)</option>
+            <option value="full" selected>Full · equilibrado</option>
+            <option value="heavy">Heavy · más preciso, más lento</option>
+          </select>
+        </label>
+        <label>Fotogramas analizados
+          <select id="fps">
+            <option value="10">10 por segundo</option>
+            <option value="15" selected>15 por segundo</option>
+            <option value="30">30 por segundo</option>
+          </select>
+        </label>
+        <button class="btn primary" id="btn-analyze" disabled>Analizar postura</button>
+        <button class="btn" id="btn-cancel" hidden>Cancelar</button>
+      </div>
+      <div class="progress" id="progress" hidden>
+        <div class="bar"><span id="progress-bar"></span></div>
+        <p id="progress-text" aria-live="polite"></p>
+      </div>
+      <p class="status" id="status" aria-live="polite"></p>
+    </section>
+
+    <!-- 3. Resultados -->
+    <section class="card" id="step-results" hidden>
+      <h2><span class="num">3</span> Postura</h2>
+
+      <div class="quality" id="quality"></div>
+
+      <div class="viewer">
+        <div class="stage" id="stage">
+          <video id="video" playsinline muted controls preload="auto"></video>
+          <canvas id="overlay"></canvas>
+        </div>
+        <aside class="side">
+          <div class="panel">
+            <div class="panel-head">
+              <h3>Esqueleto 3D</h3>
+              <div class="seg" role="group" aria-label="Vista 3D">
+                <button data-view="camara" class="on">Cámara</button>
+                <button data-view="lateral">Lateral</button>
+                <button data-view="superior">Superior</button>
+              </div>
+            </div>
+            <canvas id="view3d" class="view3d" title="Arrastra para girar"></canvas>
+            <p class="micro">Arrastra para girar · profundidad estimada con una sola cámara</p>
+          </div>
+          <div class="panel">
+            <h3>Fotograma actual <span id="cur-time" class="muted"></span></h3>
+            <table class="now" id="now-table"></table>
+          </div>
+        </aside>
+      </div>
+
+      <div class="controls compact">
+        <div class="seg" role="group" aria-label="Modo de cálculo">
+          <button data-mode="2d" class="on" title="Ángulos en el plano de la imagen: como mediría un técnico sobre el vídeo">Ángulos 2D (plano de imagen)</button>
+          <button data-mode="3d" title="Ángulos con las coordenadas 3D estimadas por el modelo">Ángulos 3D (estimados)</button>
+        </div>
+        <label>Suavizado
+          <select id="smooth">
+            <option value="1">Sin suavizar</option>
+            <option value="3">Ligero (3 fotogramas)</option>
+            <option value="5" selected>Medio (5 fotogramas)</option>
+            <option value="9">Fuerte (9 fotogramas)</option>
+          </select>
+        </label>
+        <span class="legend-inline">
+          <span class="key"><i class="sw side-L"></i>Izquierda del trabajador</span>
+          <span class="key"><i class="sw side-R"></i>Derecha del trabajador</span>
+        </span>
+      </div>
+
+      <div class="charts" id="charts"></div>
+
+      <h3 class="sub">Resumen por articulación</h3>
+      <div class="table-scroll">
+        <table class="stats" id="stats-table"></table>
+      </div>
+
+      <div class="export">
+        <h3 class="sub">Exportar</h3>
+        <button class="btn" id="exp-angles">Ángulos (CSV)</button>
+        <button class="btn" id="exp-landmarks">Puntos clave (CSV)</button>
+        <button class="btn" id="exp-json">Datos completos (JSON)</button>
+      </div>
+    </section>
+
+    <section class="note">
+      <p><strong>Prueba de concepto, no herramienta de evaluación validada.</strong>
+        Los ángulos son estimaciones de visión artificial monocular (MediaPipe BlazePose). Su precisión depende del
+        encuadre, la oclusión y la orientación de la cámara, y debe contrastarse con mediciones de referencia antes de
+        aplicar métodos como REBA, RULA u OWAS.</p>
+      <p class="muted">v<span id="app-version"></span> · MediaPipe Tasks Vision <span id="mp-version"></span></p>
+    </section>
+  </main>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
