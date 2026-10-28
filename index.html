@@ -15,10 +15,16 @@
         <p class="eyebrow">Modelo biomecánico · Fase 1 · Percepción</p>
         <h1>Postura desde vídeo</h1>
       </div>
-      <span class="badge" title="El vídeo se analiza en este navegador; no se sube a ningún servidor.">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3Z" fill="none" stroke="currentColor" stroke-width="2"/></svg>
-        Procesado 100&nbsp;% en tu dispositivo
-      </span>
+      <div class="badges">
+        <span class="badge" title="Escenario A: el vídeo se analiza en este navegador; no se sube a ningún servidor.">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3Z" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+          MediaPipe en tu dispositivo
+        </span>
+        <button class="badge badge-btn" id="key-badge" type="button" title="La clave solo se guarda en la memoria de esta pestaña">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="15" r="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="m11 12 9-9m-4 4 3 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          <span id="key-status">Gemini: sin clave</span>
+        </button>
+      </div>
     </div>
   </header>
 
@@ -112,6 +118,14 @@
       </div>
 
       <div class="controls compact">
+        <div class="seg" role="group" aria-label="Escenario">
+          <button data-scenario="A" class="on" title="MediaPipe en el navegador, con o sin filtros">A · MediaPipe</button>
+          <button data-scenario="B" disabled title="Gemini 4 Argon estima los ángulos a partir del vídeo">B · Argon</button>
+          <button data-scenario="C" disabled title="Serie de MediaPipe revisada y corregida por Gemini 4 Argon">C · Mixto</button>
+        </div>
+        <label class="check"><input type="checkbox" id="filters" checked> Filtros anti-oclusión</label>
+      </div>
+      <div class="controls compact">
         <div class="seg" role="group" aria-label="Modo de cálculo">
           <button data-mode="2d" class="on" title="Ángulos en el plano de la imagen: como mediría un técnico sobre el vídeo">Ángulos 2D (plano de imagen)</button>
           <button data-mode="3d" title="Ángulos con las coordenadas 3D estimadas por el modelo">Ángulos 3D (estimados)</button>
@@ -130,11 +144,24 @@
         </span>
       </div>
 
+      <p class="micro" id="ghost-note"></p>
       <div class="charts" id="charts"></div>
 
-      <h3 class="sub">Resumen por articulación</h3>
+      <h3 class="sub">Resumen por articulación <span class="muted" id="stats-scenario"></span></h3>
       <div class="table-scroll">
         <table class="stats" id="stats-table"></table>
+      </div>
+
+      <details class="tips" id="filters-details">
+        <summary>Qué han descartado los filtros (escenario A)</summary>
+        <p class="micro">Fotogramas por articulación. «Interpolados» son huecos de menos de 0,3 s rellenados; el resto se deja vacío.</p>
+        <div class="table-scroll"><table class="stats" id="filters-table"></table></div>
+      </details>
+
+      <div id="compare" hidden>
+        <h3 class="sub">Comparativa de escenarios</h3>
+        <p class="micro">Diferencia media: media de |B − A| y |C − A| en los instantes en que ambos tienen valor.</p>
+        <div class="table-scroll"><table class="stats" id="compare-table"></table></div>
       </div>
 
       <div class="export">
@@ -142,6 +169,46 @@
         <button class="btn" id="exp-angles">Ángulos (CSV)</button>
         <button class="btn" id="exp-landmarks">Puntos clave (CSV)</button>
         <button class="btn" id="exp-json">Datos completos (JSON)</button>
+      </div>
+    </section>
+
+    <!-- 4. Gemini 4 Argon -->
+    <section class="card" id="step-argon" hidden>
+      <h2><span class="num">4</span> Escenarios con Gemini 4 Argon</h2>
+      <div class="scenarios">
+        <div class="scenario">
+          <h3>B · Argon solo</h3>
+          <p>Argon ve el vídeo y estima los ángulos por su cuenta, sin MediaPipe. Aporta además el contexto de la tarea.</p>
+        </div>
+        <div class="scenario">
+          <h3>C · Mixto</h3>
+          <p>Argon ve el vídeo y la serie densa de MediaPipe (A). Marca los tramos implausibles, como un brazo tapado que MediaPipe levanta, propone valores corregidos y aporta el contexto.</p>
+        </div>
+      </div>
+      <div class="controls">
+        <label>Muestreo del vídeo
+          <select id="argon-fps">
+            <option value="1">1 fotograma/s · más barato</option>
+            <option value="2" selected>2 fotogramas/s</option>
+            <option value="4">4 fotogramas/s · más detalle</option>
+          </select>
+        </label>
+        <label>Razonamiento
+          <select id="argon-thinking">
+            <option value="low">Bajo · rápido</option>
+            <option value="medium" selected>Medio</option>
+            <option value="high">Alto · más lento</option>
+          </select>
+        </label>
+        <button class="btn primary" id="btn-run-b">Ejecutar B</button>
+        <button class="btn primary" id="btn-run-c">Ejecutar C</button>
+        <button class="btn" id="btn-argon-cancel" hidden>Cancelar</button>
+      </div>
+      <p class="status" id="argon-status" aria-live="polite"></p>
+      <p class="micro">El vídeo se envía a la API de Google Gemini. Úsalo solo con vídeos que se puedan tratar fuera del dispositivo.</p>
+      <div class="context-grid">
+        <div class="panel" id="context-B" hidden></div>
+        <div class="panel" id="context-C" hidden></div>
       </div>
     </section>
 
@@ -153,6 +220,22 @@
       <p class="muted">v<span id="app-version"></span> · MediaPipe Tasks Vision <span id="mp-version"></span></p>
     </section>
   </main>
+
+  <dialog id="key-dialog" aria-labelledby="key-title">
+    <h2 id="key-title">Clave de la API de Gemini</h2>
+    <p>Hace falta para los escenarios <strong>B</strong> y <strong>C</strong> (Gemini 4 Argon). El escenario A (MediaPipe) funciona sin ella.</p>
+    <ul class="micro-list">
+      <li>Se guarda solo en la memoria de esta pestaña: no se almacena en el navegador ni en ningún archivo. Al recargar, se vuelve a pedir.</li>
+      <li>Gemini 4 Argon no está disponible en el nivel gratuito de la API.</li>
+    </ul>
+    <label class="field">Clave (API key)
+      <input type="password" id="key-input" autocomplete="off" spellcheck="false" placeholder="AIza…">
+    </label>
+    <div class="actions end">
+      <button class="btn" id="key-skip" type="button">Continuar sin Gemini</button>
+      <button class="btn primary" id="key-ok" type="button">Usar esta clave</button>
+    </div>
+  </dialog>
 
   <script type="module" src="js/app.js"></script>
 </body>

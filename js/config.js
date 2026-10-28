@@ -2,7 +2,7 @@
 // Para no depender de CDNs externos (redes corporativas, uso offline), ejecuta
 // `scripts/descargar-dependencias.sh` y pon USE_LOCAL_ASSETS = true.
 
-export const APP_VERSION = '0.1.0';
+export const APP_VERSION = '0.2.0';
 
 const USE_LOCAL_ASSETS = false;
 const TASKS_VISION_VERSION = '1.1.1';
@@ -34,3 +34,24 @@ export const CONFIG = USE_LOCAL_ASSETS
 
 // Umbral de visibilidad por debajo del cual un punto no se usa para calcular ángulos.
 export const VISIBILITY_THRESHOLD = 0.5;
+
+// Filtros contra oclusiones y reconstrucciones erróneas (js/filters.js).
+export const FILTROS = {
+  toleranciaHueso: 0.3,      // variación máxima de la longitud 3D de un segmento respecto a su mediana en el vídeo
+  coherenciaVertical: 0.5,   // seno del ángulo con la horizontal (0,5 = 30°) para comparar 2D y 3D
+  hampelVentana_s: 0.5,      // semiventana del filtro de Hampel
+  hampelSigmas: 3,
+  hampelMinimo: 12,          // grados: por debajo de esta desviación nunca se considera atípico
+  tramoMinimo_s: 0.4,        // tramos más cortos que esto, separados por un salto, se descartan
+  huecoMaximo_s: 0.3,        // huecos más cortos que esto se rellenan por interpolación lineal
+  // Velocidad angular máxima plausible (grados/s) por grupo articular.
+  velocidadMaxima: { tronco: 300, cuello: 300, hombro: 500, codo: 500, cadera: 300, rodilla: 400 },
+  // Rango fisiológico (grados) por grupo articular.
+  rango: { tronco: [0, 120], cuello: [0, 90], hombro: [0, 180], codo: [0, 160], cadera: [0, 150], rodilla: [0, 165] },
+};
+
+// Escenarios B y C: Gemini 4 Argon a través de la Interactions API.
+export const GEMINI = {
+  modelo: 'gemini-4-argon',
+  maxTokensSalida: 32768,
+};

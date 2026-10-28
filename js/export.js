@@ -37,12 +37,14 @@ export function exportLandmarksCSV(meta, frames) {
   download(`${baseName(meta)}_landmarks.csv`, csv, 'text/csv');
 }
 
-export function exportJSON(meta, frames) {
+/** `extra`: configuración de los filtros y respuestas de los escenarios B y C. */
+export function exportJSON(meta, frames, extra = {}) {
   const payload = {
     formato: 'postura/v1',
     descripcion: 'lm: [x,y,z,visibilidad] normalizados a la imagen (0-1). wlm: [x,y,z,visibilidad] en metros, origen en el centro de la cadera (MediaPipe world landmarks).',
     landmarks: LANDMARK_NAMES,
     meta,
+    ...extra,
     frames,
   };
   download(`${baseName(meta)}_pose.json`, JSON.stringify(payload), 'application/json');

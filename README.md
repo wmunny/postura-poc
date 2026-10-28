@@ -5,12 +5,46 @@ Prueba de concepto de la **Fase 1 (percepción)** de un modelo biomecánico. A p
 1. Estima la **postura fotograma a fotograma**: 33 puntos clave en 2D y 3D (MediaPipe Pose Landmarker).
 2. Dibuja el **esqueleto sobre el vídeo** y en un **visor 3D** que se puede girar.
 3. Calcula los **ángulos articulares** de tronco, cuello, hombros, codos, caderas y rodillas, en dos modos: plano de imagen (2D) o estimación 3D.
-4. Muestra la **evolución temporal** de cada ángulo y un **resumen estadístico** (media, mediana, P95, mínimo, máximo y cobertura).
-5. **Exporta** los ángulos (CSV), los puntos clave (CSV) y los datos completos (JSON, formato `postura/v1`) para las fases siguientes (REBA, RULA, OWAS, NIOSH, OpenSim…).
+4. Aplica **filtros anti-oclusión** que descartan reconstrucciones erróneas (por ejemplo, un brazo tapado que MediaPipe «levanta»).
+5. Muestra la **evolución temporal** de cada ángulo y un **resumen estadístico** (media, mediana, P95, mínimo, máximo y cobertura).
+6. Compara **tres escenarios**: MediaPipe (A), Gemini 4 Argon (B) y la combinación de ambos (C).
+7. **Exporta** los ángulos (CSV), los puntos clave (CSV) y los datos completos (JSON, formato `postura/v1`) para las fases siguientes (REBA, RULA, OWAS, NIOSH, OpenSim…).
 
-**Todo se procesa en el navegador.** El vídeo no se sube a ningún servidor.
+**El escenario A se procesa entero en el navegador.** En B y C, el vídeo se envía a la API de Google Gemini.
 
-> Es una prueba de concepto, no una herramienta de evaluación validada. Consulta las limitaciones en [`docs/LIBRERIAS.md`](docs/LIBRERIAS.md).
+> Es una prueba de concepto, no una herramienta de evaluación validada. Consulta las limitaciones en [`docs/LIBRERIAS.md`](docs/LIBRERIAS.md) y los próximos pasos en [`docs/ROADMAP.md`](docs/ROADMAP.md).
+
+## Escenarios
+
+| Escenario | Qué hace | Dónde se ejecuta |
+|---|---|---|
+| **A · MediaPipe** | Serie densa de ángulos (10–30 por segundo), con o sin filtros anti-oclusión | Navegador |
+| **B · Argon solo** | Gemini 4 Argon ve el vídeo y estima los ángulos y el contexto de la tarea | API de Gemini |
+| **C · Mixto** | Argon ve el vídeo y la serie de A, marca los tramos implausibles, propone correcciones y aporta contexto | Navegador + API de Gemini |
+
+En las gráficas, la línea tenue es la referencia: en A, la serie sin filtrar; en B y C, el escenario A. La tabla *Comparativa de escenarios* muestra medias, P95, cobertura y la diferencia media con A.
+
+### Clave de la API de Gemini
+
+Al abrir la app se pide la clave. **Solo se guarda en la memoria de la pestaña**: no va a `localStorage`, cookies ni a la URL, y se envía únicamente en la cabecera `x-goog-api-key`. Al recargar, se vuelve a pedir. Sin clave funciona el escenario A.
+
+Gemini 4 Argon (`gemini-4-argon`) no está disponible en el nivel gratuito. Los vídeos de menos de 14 MB se envían en la propia petición; los mayores, con la Files API.
+
+## Filtros anti-oclusión
+
+Se activan con la casilla *Filtros anti-oclusión* y se configuran en `js/config.js` (`FILTROS`):
+
+| Filtro | Qué descarta |
+|---|---|
+| Visibilidad | Puntos con visibilidad < 0,5 (siempre activo) |
+| Longitud de hueso | Segmentos cuya longitud 3D se aleja más de un 30 % de su mediana en el vídeo |
+| Coherencia 2D–3D | Segmentos que en 3D apuntan hacia arriba y en la imagen hacia abajo (o al revés), con más de 30° de margen |
+| Rango fisiológico | Ángulos fuera del rango posible de cada articulación |
+| Hampel | Valores atípicos frente a la mediana local (±0,5 s) |
+| Saltos | Tramos de menos de 0,4 s separados por un cambio más rápido que la velocidad máxima plausible |
+| Interpolación | Rellena huecos de menos de 0,3 s; los más largos se dejan vacíos |
+
+El desplegable *Qué han descartado los filtros* cuenta los fotogramas afectados por cada uno.
 
 ## Publicar en GitHub Pages
 
@@ -50,7 +84,7 @@ Después pon `USE_LOCAL_ASSETS = true` en `js/config.js` y sube también la carp
 - Móvil **recto y estable**, en trípode o apoyado. La vertical de la cámara es la referencia del ángulo del tronco.
 - Cámara **perpendicular al plano del movimiento**: de lado para la flexión de tronco, cadera y rodilla.
 - El trabajador **entero en el encuadre**, a 3–5 m, con buena luz y una sola persona en plano.
-- Los iPhone graban en HEVC por defecto, y Chrome en Windows puede no leerlo. En ese caso, usa Safari o activa *Ajustes › Cámara › Formatos › Más compatible*.
+- Los iPhone graban en HEVC por defecto, y Chrome en Windows puede no leerlo. En ese caso, usa Safari o activa *Ajustes › Cámara › Formatos › Más compatible*. Los AVI de cámara (Motion JPEG) tampoco se reproducen: conviértelos a MP4 H.264.
 
 ## Estructura
 
@@ -60,10 +94,14 @@ css/styles.css        Estilos (claro y oscuro, adaptados a móvil)
 js/config.js          Versiones, URLs de modelos y umbrales
 js/pose.js            Motor de pose: carga de MediaPipe y recorrido del vídeo
 js/angles.js          Definición y cálculo de ángulos, suavizado y estadísticas
+js/filters.js         Filtros anti-oclusión
+js/gemini.js          Cliente de la API de Gemini (clave solo en memoria)
+js/argon.js           Escenarios B y C: instrucciones, esquemas de salida y combinación con A
 js/charts.js          Gráficas temporales (canvas, sin dependencias)
 js/render.js          Esqueleto sobre el vídeo y visor 3D
 js/export.js          Exportación CSV y JSON
 docs/LIBRERIAS.md     Análisis de librerías y recomendación por fases
+docs/ROADMAP.md       Hoja de ruta hacia la skill de REBA, RULA y OWAS
 scripts/              Descarga de dependencias para el modo sin CDN
 ```
 

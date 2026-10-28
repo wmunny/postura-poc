@@ -35,10 +35,12 @@ export class AngleChart {
     new ResizeObserver(() => this.draw()).observe(this.el);
   }
 
-  setData(times, data) {
+  /** `ghost`: serie de referencia que se dibuja tenue debajo (sin filtrar, o el escenario A). */
+  setData(times, data, ghost = null) {
     this.times = times;
     this.data = data;
-    const vals = this.series.flatMap((s) => data[s.id] || []).filter((v) => v != null);
+    this.ghost = ghost;
+    const vals = this.series.flatMap((s) => [...(data[s.id] || []), ...(ghost?.[s.id] || [])]).filter((v) => v != null);
     const max = vals.length ? Math.max(...vals) : 90;
     this.yMax = Math.max(60, Math.ceil(max / 30) * 30);
     this.tMax = times.length ? times[times.length - 1] : 1;
@@ -71,7 +73,9 @@ export class AngleChart {
     if (this.hoverT == null || i < 0) { this.tooltip.hidden = true; return; }
     const rows = this.series.map((s) => {
       const v = this.data[s.id]?.[i];
-      return `<div class="row"><i class="sw side-${s.side}"></i><span>${s.label}</span><b>${v == null ? '—' : v.toFixed(0) + '°'}</b></div>`;
+      const g = this.ghost?.[s.id]?.[i];
+      const ref = this.ghost && g !== v ? ` <span class="muted">(${g == null ? '—' : g.toFixed(0) + '°'})</span>` : '';
+      return `<div class="row"><i class="sw side-${s.side}"></i><span>${s.label}</span><b>${v == null ? '—' : v.toFixed(0) + '°'}${ref}</b></div>`;
     }).join('');
     this.tooltip.innerHTML = `<div class="tt-time">${this.times[i].toFixed(2)} s</div>${rows}`;
     this.tooltip.hidden = false;
@@ -114,11 +118,10 @@ export class AngleChart {
       }
     }
 
-    // Series (huecos donde no hay detección)
-    for (const s of this.series) {
-      const vals = this.data[s.id] || [];
-      ctx.strokeStyle = css(`--side-${s.side}`);
-      ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    // Series (huecos donde no hay detección); la referencia, tenue y debajo
+    const line = (vals, color, width, alpha) => {
+      ctx.strokeStyle = color; ctx.globalAlpha = alpha;
+      ctx.lineWidth = width; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
       ctx.beginPath();
       let pen = false;
       vals.forEach((v, i) => {
@@ -127,7 +130,10 @@ export class AngleChart {
         if (pen) ctx.lineTo(x, y); else { ctx.moveTo(x, y); pen = true; }
       });
       ctx.stroke();
-    }
+      ctx.globalAlpha = 1;
+    };
+    if (this.ghost) for (const s of this.series) line(this.ghost[s.id] || [], css(`--side-${s.side}`), 1.5, 0.28);
+    for (const s of this.series) line(this.data[s.id] || [], css(`--side-${s.side}`), 2, 1);
 
     // Cabezal de reproducción
     if (this.playT != null) {

@@ -1,9 +1,12 @@
-import { APP_VERSION, CONFIG } from './config.js';
+import { APP_VERSION, CONFIG, FILTROS, GEMINI } from './config.js';
 import { analyzeVideo } from './pose.js';
 import { ANGLE_DEFS, GROUPS, computeSeries, anglesForFrame, stats } from './angles.js';
+import { RAZONES } from './filters.js';
 import { AngleChart } from './charts.js';
 import { drawOverlay, Viewer3D } from './render.js';
 import { exportAnglesCSV, exportLandmarksCSV, exportJSON } from './export.js';
+import { setApiKey, hasApiKey } from './gemini.js';
+import { runB, runC, viewB, viewC } from './argon.js';
 
 const $ = (s) => document.querySelector(s);
 const video = $('#video');
@@ -17,13 +20,51 @@ const state = {
   meta: null,
   mode: '2d',
   smooth: 5,
-  computed: null,
+  filtros: true,
+  scenario: 'A',
+  views: {},          // A, B, C: { times, series, ... }
+  argon: { B: null, C: null },
+  computed: null,     // vista activa
   charts: [],
   abort: null,
+  argonAbort: null,
 };
+
+const SCENARIO_NAMES = { A: 'A · MediaPipe', B: 'B · Argon solo', C: 'C · Mixto' };
+const LABEL = Object.fromEntries(ANGLE_DEFS.map((d) => [d.id, d.label]));
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 $('#app-version').textContent = APP_VERSION;
 $('#mp-version').textContent = CONFIG.tasksVisionVersion;
+
+// ---------- 0. Clave de Gemini (solo en memoria) ----------
+const keyDialog = $('#key-dialog');
+function updateKeyUI() {
+  const ok = hasApiKey();
+  $('#key-status').textContent = ok ? 'Gemini: clave en memoria' : 'Gemini: sin clave';
+  $('#key-badge').classList.toggle('ok', ok);
+  $('#key-skip').textContent = ok ? 'Olvidar la clave' : 'Continuar sin Gemini';
+}
+function openKeyDialog() {
+  updateKeyUI();
+  $('#key-input').value = '';
+  keyDialog.showModal();
+  $('#key-input').focus();
+}
+$('#key-ok').addEventListener('click', () => {
+  const v = $('#key-input').value.trim();
+  if (!v) { $('#key-input').focus(); return; }
+  setApiKey(v);
+  keyDialog.close();
+});
+$('#key-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#key-ok').click(); });
+$('#key-skip').addEventListener('click', () => {
+  if (hasApiKey()) setApiKey(null);
+  keyDialog.close();
+});
+keyDialog.addEventListener('close', () => { $('#key-input').value = ''; updateKeyUI(); });
+$('#key-badge').addEventListener('click', openKeyDialog);
+openKeyDialog();
 
 // ---------- 1. Carga del vídeo ----------
 function setFile(file) {
@@ -36,11 +77,13 @@ function setFile(file) {
   state.file = file;
   state.url = URL.createObjectURL(file);
   state.frames = null;
+  resetArgon();
   $('#file-name').hidden = false;
   $('#file-name').textContent = `${file.name} · ${(file.size / 1e6).toFixed(1)} MB`;
   video.src = state.url;
   video.load();
   $('#step-results').hidden = true;
+  $('#step-argon').hidden = true;
   setStatus('Cargando vídeo…');
   $('#btn-analyze').disabled = true;
 }
@@ -57,7 +100,7 @@ video.addEventListener('loadedmetadata', () => {
 });
 video.addEventListener('error', () => {
   if (!state.file) return;
-  setStatus('Este navegador no puede reproducir el vídeo (¿HEVC/H.265 de iPhone en Windows?). Prueba con Safari, o exporta a MP4 H.264 («Más compatible» en Ajustes › Cámara › Formatos).', true);
+  setStatus('Este navegador no puede reproducir el vídeo (por ejemplo, HEVC/H.265 de iPhone en Windows, o AVI de cámara). Conviértelo a MP4 H.264 o, en el iPhone, activa «Más compatible» en Ajustes › Cámara › Formatos.', true);
 });
 
 $('#file-record').addEventListener('change', (e) => setFile(e.target.files[0]));
@@ -152,13 +195,40 @@ function buildCharts() {
 
 function recompute() {
   if (!state.frames) return;
-  state.computed = computeSeries(state.frames, {
-    mode: state.mode, width: state.meta.width, height: state.meta.height, smoothWindow: state.smooth,
+  const A = computeSeries(state.frames, {
+    mode: state.mode, width: state.meta.width, height: state.meta.height,
+    smoothWindow: state.smooth, filtros: state.filtros,
   });
-  const { times, series } = state.computed;
-  state.charts.forEach((c) => c.setData(times, series));
+  state.views = { A };
+  if (state.argon.B) state.views.B = viewB(state.argon.B, A.times);
+  if (state.argon.C) state.views.C = viewC(state.argon.C, A);
+  if (!state.views[state.scenario]) state.scenario = 'A';
+  document.querySelectorAll('[data-scenario]').forEach((b) => {
+    b.classList.toggle('on', b.dataset.scenario === state.scenario);
+    b.disabled = !state.views[b.dataset.scenario];
+  });
+
+  state.computed = state.views[state.scenario];
+  const ghost = state.scenario === 'A' ? A.raw : A.series;
+  state.charts.forEach((c) => c.setData(state.computed.times, state.computed.series, ghost));
+  renderGhostNote();
   renderStats();
+  renderFilters(A);
+  renderCompare();
   syncToVideo();
+}
+
+function renderGhostNote() {
+  const notes = {
+    A: state.filtros ? 'Línea tenue: MediaPipe sin filtrar. Lo que ves por encima es lo que queda tras los filtros.' : '',
+    B: 'Línea tenue: escenario A (MediaPipe). Los ángulos de Argon son anatómicos en 3D: compáralos con el modo «Ángulos 3D».',
+    C: 'Línea tenue: escenario A antes de la revisión de Argon.',
+  };
+  let note = notes[state.scenario];
+  if (state.scenario === 'C' && state.argon.C && state.argon.C.mode !== state.mode) {
+    note += ` La revisión se hizo con ángulos ${state.argon.C.mode.toUpperCase()}: cambia a ese modo para compararla bien.`;
+  }
+  $('#ghost-note').textContent = note;
 }
 
 function renderQuality() {
@@ -177,16 +247,57 @@ function renderQuality() {
     kpi(`${m.tiempoProceso_s} s`, `proceso · ${m.delegate}`);
 }
 
+const deg = (v) => (v == null ? '—' : `${v.toFixed(0)}°`);
+const coverage = (s) => Math.round((100 * s.filter((v) => v != null).length) / (s.length || 1));
+
 function renderStats() {
   const { series } = state.computed;
+  $('#stats-scenario').textContent = `· ${SCENARIO_NAMES[state.scenario]}`;
   const rows = ANGLE_DEFS.map((d) => {
     const s = stats(series[d.id]);
-    const cov = Math.round((100 * s.n) / series[d.id].length);
-    const f = (v) => (v == null ? '—' : `${v.toFixed(0)}°`);
     return `<tr><td><i class="sw side-${d.side}"></i><span title="${d.help}">${d.label}</span></td>
-      <td>${f(s.mean)}</td><td>${f(s.p50)}</td><td>${f(s.p95)}</td><td>${f(s.min)}</td><td>${f(s.max)}</td><td>${cov} %</td></tr>`;
+      <td>${deg(s.mean)}</td><td>${deg(s.p50)}</td><td>${deg(s.p95)}</td><td>${deg(s.min)}</td><td>${deg(s.max)}</td><td>${coverage(series[d.id])} %</td></tr>`;
   }).join('');
   $('#stats-table').innerHTML = `<thead><tr><th>Ángulo</th><th>Media</th><th>Mediana</th><th>P95</th><th>Mín.</th><th>Máx.</th><th>Cobertura</th></tr></thead><tbody>${rows}</tbody>`;
+}
+
+function renderFilters(A) {
+  const keys = state.filtros ? Object.keys(RAZONES) : ['visibilidad'];
+  const head = `<tr><th>Ángulo</th>${keys.map((k) => `<th>${RAZONES[k]}</th>`).join('')}<th>Cobertura final</th></tr>`;
+  const rows = ANGLE_DEFS.map((d) => {
+    const q = A.quality[d.id];
+    return `<tr><td><i class="sw side-${d.side}"></i>${d.label}</td>${keys.map((k) => `<td${q[k] ? '' : ' class="good"'}>${q[k]}</td>`).join('')}<td>${coverage(A.series[d.id])} %</td></tr>`;
+  }).join('');
+  $('#filters-table').innerHTML = `<thead>${head}</thead><tbody>${rows}</tbody>`;
+  $('#filters-details').querySelector('summary').textContent = state.filtros
+    ? 'Qué han descartado los filtros (escenario A)'
+    : 'Filtros desactivados: solo se descartan los puntos con visibilidad baja';
+}
+
+function meanAbsDiff(a, b) {
+  let s = 0, n = 0;
+  a.forEach((v, i) => { if (v != null && b[i] != null) { s += Math.abs(v - b[i]); n++; } });
+  return n ? s / n : null;
+}
+
+function renderCompare() {
+  const others = ['B', 'C'].filter((k) => state.views[k]);
+  $('#compare').hidden = !others.length;
+  if (!others.length) return;
+  const all = ['A', ...others];
+  const head = `<tr><th>Ángulo</th>${all.map((k) => `<th>Media ${k}</th>`).join('')}${all.map((k) => `<th>P95 ${k}</th>`).join('')}`
+    + `${all.map((k) => `<th>Cobertura ${k}</th>`).join('')}${others.map((k) => `<th>|${k} − A|</th>`).join('')}</tr>`;
+  const rows = ANGLE_DEFS.map((d) => {
+    const s = Object.fromEntries(all.map((k) => [k, state.views[k].series[d.id]]));
+    const st = Object.fromEntries(all.map((k) => [k, stats(s[k])]));
+    return `<tr><td><i class="sw side-${d.side}"></i>${d.label}</td>`
+      + all.map((k) => `<td>${deg(st[k].mean)}</td>`).join('')
+      + all.map((k) => `<td>${deg(st[k].p95)}</td>`).join('')
+      + all.map((k) => `<td>${coverage(s[k])} %</td>`).join('')
+      + others.map((k) => `<td>${deg(meanAbsDiff(s[k], s.A))}</td>`).join('')
+      + '</tr>';
+  }).join('');
+  $('#compare-table').innerHTML = `<thead>${head}</thead><tbody>${rows}</tbody>`;
 }
 
 function frameIndexAt(t) {
@@ -228,6 +339,7 @@ function showResults() {
   buildCharts();
   renderQuality();
   recompute();
+  $('#step-argon').hidden = false;
   video.currentTime = 0;
 }
 
@@ -240,11 +352,126 @@ document.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('clic
   document.querySelectorAll('[data-view]').forEach((x) => x.classList.toggle('on', x === b));
   viewer.setView(b.dataset.view);
 }));
+document.querySelectorAll('[data-scenario]').forEach((b) => b.addEventListener('click', () => {
+  state.scenario = b.dataset.scenario;
+  recompute();
+}));
 $('#smooth').addEventListener('change', (e) => { state.smooth = Number(e.target.value); recompute(); });
+$('#filters').addEventListener('change', (e) => { state.filtros = e.target.checked; recompute(); });
 
-$('#exp-angles').addEventListener('click', () => exportAnglesCSV(state.meta, state.computed.times, state.computed.series, state.mode));
+// ---------- 4. Escenarios B y C (Gemini 4 Argon) ----------
+function argonStatus(msg, isError = false) {
+  const el = $('#argon-status');
+  el.textContent = msg;
+  el.classList.toggle('error', isError);
+}
+
+function resetArgon() {
+  state.argonAbort?.abort();
+  state.argon = { B: null, C: null };
+  state.scenario = 'A';
+  for (const k of ['B', 'C']) { $(`#context-${k}`).hidden = true; $(`#context-${k}`).innerHTML = ''; }
+  argonStatus('');
+}
+
+function tokensOf(u) {
+  if (!u) return null;
+  return u.total_tokens ?? u.totalTokenCount ?? (((u.input_tokens ?? 0) + (u.output_tokens ?? 0)) || null);
+}
+
+async function runArgon(kind) {
+  if (!hasApiKey()) { openKeyDialog(); return; }
+  if (!state.views.A) return;
+  state.argonAbort = new AbortController();
+  $('#btn-run-b').disabled = $('#btn-run-c').disabled = true;
+  $('#btn-argon-cancel').hidden = false;
+  const args = {
+    file: state.file,
+    duration: video.duration,
+    fps: Number($('#argon-fps').value),
+    thinking: $('#argon-thinking').value,
+    signal: state.argonAbort.signal,
+    onStatus: (m) => argonStatus(m),
+  };
+  argonStatus('Preparando el vídeo…');
+  try {
+    const r = kind === 'B' ? await runB(args) : await runC({ ...args, base: state.views.A, mode: state.mode });
+    state.argon[kind] = r;
+    state.scenario = kind;
+    recompute();
+    renderContext(kind);
+    const tok = tokensOf(r.usage);
+    argonStatus(`Escenario ${kind} listo en ${r.segundos.toFixed(0)} s${tok ? ` · ${tok.toLocaleString('es-ES')} tokens` : ''}.`);
+  } catch (err) {
+    if (err.name === 'AbortError') argonStatus('Cancelado.');
+    else {
+      console.error(err);
+      const hint = err.status === 400 && /key/i.test(err.message) ? ' Revisa la clave.'
+        : err.status === 401 || err.status === 403 ? ' La clave no es válida o no tiene acceso a este modelo.'
+        : err.status === 404 ? ` El modelo ${GEMINI.modelo} no está disponible para esta clave.`
+        : err.status === 429 ? ' Se ha superado la cuota; espera un poco o revisa el plan.'
+        : '';
+      argonStatus(`Error de Gemini: ${err.message}.${hint}`, true);
+    }
+  } finally {
+    $('#btn-run-b').disabled = $('#btn-run-c').disabled = false;
+    $('#btn-argon-cancel').hidden = true;
+  }
+}
+$('#btn-run-b').addEventListener('click', () => runArgon('B'));
+$('#btn-run-c').addEventListener('click', () => runArgon('C'));
+$('#btn-argon-cancel').addEventListener('click', () => state.argonAbort?.abort());
+
+const fmtT = (t) => `<button class="tlink" type="button" data-t="${Number(t) || 0}">${(Number(t) || 0).toFixed(1)} s</button>`;
+const span = (x) => `${fmtT(x.inicio)}–${(Number(x.fin) || 0).toFixed(1)} s`;
+const list = (items, fn, empty) => (items?.length ? `<ul>${items.map((x) => `<li>${fn(x)}</li>`).join('')}</ul>` : `<p class="muted">${empty}</p>`);
+const pretty = (s) => esc(String(s ?? '').replace(/_/g, ' '));
+
+function renderContext(kind) {
+  const r = state.argon[kind];
+  const j = r.json, c = j.contexto || {};
+  const tok = tokensOf(r.usage);
+  let html = `<div class="context">
+    <h3>${SCENARIO_NAMES[kind]}</h3>
+    <p class="meta">${r.fps} fotogramas/s · razonamiento ${{ low: 'bajo', medium: 'medio', high: 'alto' }[r.thinking] || esc(r.thinking)} ·${r.segundos.toFixed(0)} s${tok ? ` · ${tok.toLocaleString('es-ES')} tokens` : ''}${kind === 'C' ? ` · revisó ángulos ${r.mode.toUpperCase()}` : ''}</p>
+    <p>${esc(j.resumen)}</p>`;
+  if (kind === 'C') {
+    html += `<h4>Tramos revisados</h4>${list(j.revisiones, (x) => `${span(x)} · <strong>${esc(LABEL[x.articulacion] || x.articulacion)}</strong> · ${esc(x.veredicto)}: ${esc(x.motivo)}`, 'Argon no ha encontrado tramos implausibles.')}`;
+    const cam = state.views.C?.cambios;
+    if (cam) {
+      const sum = (k) => Object.values(cam).reduce((a, b) => a + b[k], 0);
+      html += `<p class="meta">Fotogramas corregidos: ${sum('corregidos')} · descartados: ${sum('descartados')} · dudosos sin corrección: ${sum('dudosos')}</p>`;
+    }
+  }
+  html += `<h4>Tarea</h4><p>${esc(c.tarea)}</p>
+    <h4>Fases</h4>${list(c.fases, (x) => `${span(x)} · ${esc(x.descripcion)}`, 'Sin fases.')}
+    <h4>Carga y agarre</h4><p>${c.carga?.manipula ? `${esc(c.carga.descripcion)}${c.carga.peso_estimado_kg != null ? ` · ~${esc(c.carga.peso_estimado_kg)} kg` : ''}` : 'No manipula carga.'} · Agarre: ${pretty(c.agarre)}</p>
+    <h4>Tronco</h4>
+    <p>Torsión:</p>${list(c.torsion_tronco, (x) => `${span(x)}${x.grados_aprox != null ? ` · ~${esc(x.grados_aprox)}°` : ''}`, 'No detectada.')}
+    <p>Inclinación lateral:</p>${list(c.inclinacion_lateral_tronco, (x) => `${span(x)}${x.grados_aprox != null ? ` · ~${esc(x.grados_aprox)}°` : ''}`, 'No detectada.')}
+    <h4>Piernas</h4><p>${pretty(c.piernas)}</p>
+    <h4>Oclusiones</h4>${list(j.oclusiones, (x) => `${span(x)} · ${esc((x.articulaciones || []).map((a) => LABEL[a] || a).join(', '))} · ${esc(x.motivo)}`, 'No se han señalado.')}
+    <h4>Observaciones</h4><p>${esc(c.observaciones)}</p>
+  </div>`;
+  const box = $(`#context-${kind}`);
+  box.innerHTML = html;
+  box.hidden = false;
+}
+document.querySelector('.context-grid').addEventListener('click', (e) => {
+  const b = e.target.closest('.tlink');
+  if (b) { video.currentTime = Number(b.dataset.t); video.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+});
+
+// ---------- Exportación ----------
+$('#exp-angles').addEventListener('click', () => exportAnglesCSV(state.meta, state.computed.times, state.computed.series, `${state.mode}_${state.scenario}`));
 $('#exp-landmarks').addEventListener('click', () => exportLandmarksCSV(state.meta, state.frames));
-$('#exp-json').addEventListener('click', () => exportJSON(state.meta, state.frames));
+$('#exp-json').addEventListener('click', () => exportJSON(state.meta, state.frames, {
+  filtros: state.filtros ? FILTROS : null,
+  escenarios: Object.fromEntries(['B', 'C'].filter((k) => state.argon[k]).map((k) => {
+    const { json, fps, thinking, segundos, mode } = state.argon[k];
+    return [k, { modelo: GEMINI.modelo, fps, razonamiento: thinking, segundos, modo: mode ?? null, respuesta: json }];
+  })),
+}));
 
 // Para depuración y pruebas automáticas
 window.__poc = { state, anglesForFrame };

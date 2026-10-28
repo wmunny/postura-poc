@@ -10,6 +10,7 @@
 // La vertical se toma del eje vertical de la cámara: graba con el móvil recto y estable.
 
 import { VISIBILITY_THRESHOLD } from './config.js';
+import { invalidPoints, filterSeries, RAZONES } from './filters.js';
 
 const L = {
   nose: 0, earL: 7, earR: 8,
@@ -122,14 +123,30 @@ function smooth(series, window) {
   });
 }
 
-/** Series temporales de todos los ángulos. */
-export function computeSeries(frames, { mode = '2d', width, height, smoothWindow = 1 } = {}) {
+/**
+ * Series temporales de todos los ángulos.
+ * Con `filtros`, devuelve también la serie sin filtrar (`raw`) y los recuentos por razón (`quality`).
+ */
+export function computeSeries(frames, { mode = '2d', width, height, smoothWindow = 1, filtros = false } = {}) {
+  const times = frames.map((f) => f.t);
   const perFrame = frames.map((f) => anglesForFrame(f, mode, width, height));
-  const series = {};
+  const invalid = filtros ? invalidPoints(frames, width, height) : null;
+  const series = {}, raw = {}, quality = {};
   for (const def of ANGLE_DEFS) {
-    series[def.id] = smooth(perFrame.map((a) => a[def.id]), smoothWindow);
+    const q = Object.fromEntries(Object.keys(RAZONES).map((k) => [k, 0]));
+    const base = perFrame.map((a) => a[def.id]);
+    let vals = base.map((v, i) => {
+      if (v == null) { if (frames[i].lm) q.visibilidad++; return null; }
+      const why = invalid?.[i] && def.needs.map((k) => invalid[i].get(k)).find(Boolean);
+      if (why) { q[why]++; return null; }
+      return v;
+    });
+    if (filtros) vals = filterSeries(vals, times, def.group, q);
+    series[def.id] = smooth(vals, smoothWindow);
+    raw[def.id] = smooth(base, smoothWindow);
+    quality[def.id] = q;
   }
-  return { times: frames.map((f) => f.t), series };
+  return { times, series, raw: filtros ? raw : null, quality };
 }
 
 function percentile(sorted, p) {

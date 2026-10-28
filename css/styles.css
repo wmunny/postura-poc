@@ -182,3 +182,46 @@ table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nu
   .card { padding: 16px; }
   h1 { font-size: 1.35rem; }
 }
+
+/* Cabecera: insignias y clave */
+.badges { display: flex; gap: 8px; flex-wrap: wrap; }
+.badge-btn { font: inherit; font-size: 0.82rem; cursor: pointer; min-height: 32px; }
+.badge-btn:hover { border-color: var(--text-muted); }
+.badge-btn.ok { color: var(--text-primary); border-color: var(--accent); }
+
+/* Escenarios */
+.seg button:disabled { opacity: .45; cursor: not-allowed; }
+.check { display: inline-flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text-secondary); cursor: pointer; min-height: 36px; }
+.check input { width: 18px; height: 18px; accent-color: var(--accent); }
+#ghost-note { margin: 0 0 8px; }
+.scenarios { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.scenario { background: var(--surface-2); border-radius: 10px; padding: 12px 14px; }
+.scenario p { margin: 0; font-size: 0.88rem; color: var(--text-secondary); }
+.context-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 12px; margin-top: 12px; }
+.context h4 { margin: 12px 0 4px; font-size: 0.85rem; }
+.context p { margin: 0 0 6px; font-size: 0.88rem; }
+.context ul { margin: 0; padding-left: 18px; font-size: 0.85rem; }
+.context li { margin: 3px 0; }
+.context .meta { font-size: 0.78rem; color: var(--text-muted); }
+.tlink {
+  border: 0; background: none; padding: 0; font: inherit; color: var(--accent); cursor: pointer;
+  font-variant-numeric: tabular-nums; text-decoration: underline; text-underline-offset: 2px;
+}
+.stats td.good { color: var(--text-secondary); }
+
+/* Diálogo de la clave */
+dialog {
+  border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; width: min(480px, calc(100vw - 32px));
+  background: var(--surface); color: var(--text-primary);
+}
+dialog::backdrop { background: rgba(0, 0, 0, .45); }
+dialog h2 { margin-bottom: 8px; }
+dialog p { margin: 0 0 8px; }
+.micro-list { margin: 0 0 14px; padding-left: 18px; font-size: 0.82rem; color: var(--text-secondary); }
+.field { display: flex; flex-direction: column; gap: 4px; font-size: 0.82rem; color: var(--text-secondary); }
+.field input {
+  min-height: 42px; padding: 0 10px; border-radius: 10px; border: 1px solid var(--border);
+  background: var(--surface); color: var(--text-primary); font: inherit; font-size: 0.95rem;
+}
+.field input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.actions.end { justify-content: flex-end; margin-top: 16px; }
