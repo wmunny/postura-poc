@@ -2,7 +2,7 @@
 // Para no depender de CDNs externos (redes corporativas, uso offline), ejecuta
 // `scripts/descargar-dependencias.sh` y pon USE_LOCAL_ASSETS = true.
 
-export const APP_VERSION = '0.5.0';
+export const APP_VERSION = '0.6.0';
 
 const USE_LOCAL_ASSETS = false;
 const TASKS_VISION_VERSION = '1.1.1';
@@ -83,11 +83,12 @@ export const VALIDACION = {
   ],
   // Métodos: ángulos que necesitan y perspectiva («pico»: peor postura; «tiempo»: proporción de tiempo).
   metodos: [
-    { id: 'REBA', perspectiva: 'pico', angulos: ['tronco', 'cuello', 'rodilla_L', 'rodilla_R', 'hombro_L', 'hombro_R', 'codo_L', 'codo_R'],
-      nota: 'La muñeca, la carga y el agarre no salen del vídeo: hay que aportarlos.' },
-    { id: 'RULA', perspectiva: 'pico', angulos: ['tronco', 'cuello', 'hombro_L', 'hombro_R', 'codo_L', 'codo_R'],
-      nota: 'La muñeca no se mide: hay que aportarla. Se puede evaluar solo el lado que se vea bien.' },
-    { id: 'OWAS', perspectiva: 'tiempo', angulos: ['tronco', 'hombro_L', 'hombro_R', 'rodilla_L', 'rodilla_R'],
+    // muneca: 'ambas' (cuentan los dos lados), 'una' (basta con un lado) o null (el método no la usa).
+    { id: 'REBA', perspectiva: 'pico', muneca: 'ambas', angulos: ['tronco', 'cuello', 'rodilla_L', 'rodilla_R', 'hombro_L', 'hombro_R', 'codo_L', 'codo_R'],
+      nota: 'La carga y el agarre los aporta el contexto de Argon o el usuario. La muñeca, por categorías estimadas por Argon (escenario C).' },
+    { id: 'RULA', perspectiva: 'pico', muneca: 'una', angulos: ['tronco', 'cuello', 'hombro_L', 'hombro_R', 'codo_L', 'codo_R'],
+      nota: 'Se puede evaluar solo el lado que se vea bien. La muñeca, por categorías estimadas por Argon (escenario C).' },
+    { id: 'OWAS', perspectiva: 'tiempo', muneca: null, angulos: ['tronco', 'hombro_L', 'hombro_R', 'rodilla_L', 'rodilla_R'],
       nota: 'Necesita estimar el % del tiempo en cada postura: pide vídeos largos o varios ciclos.' },
   ],
   // Umbrales de categoría (grados) según REBA; el codo es neutro entre 60° y 100°.

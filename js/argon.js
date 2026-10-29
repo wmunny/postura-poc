@@ -8,6 +8,7 @@
 //      lado a lado, y señala por articulación y tramo dónde está mal colocado, no se ve o está
 //      solo aproximado. No da coordenadas ni ángulos: la corrección la hace nuestro código (quita
 //      los puntos rechazados, conserva marcados los aproximados y rellena solo los huecos cortos).
+//      También estima la muñeca por categorías (fase y lado): MediaPipe no la mide con fiabilidad.
 //  D · Reglas + Argon: la misma revisión de Argon y, después, los filtros mecánicos (js/filters.js).
 
 import { ANGLE_DEFS, computeSeries, smooth, allNeeds } from './angles.js';
@@ -65,6 +66,16 @@ export const VEREDICTOS = {
   aproximada: 'Aproximada',
 };
 
+// Muñeca por categorías, como la usan REBA y RULA. Estimación visual, no medida.
+export const MUNECA_FLEXION = {
+  neutra: 'Neutra',
+  hasta_15: 'Hasta 15°',
+  mas_15: 'Más de 15°',
+  no_visible: 'No visible',
+};
+export const SI_NO = { si: 'Sí', no: 'No', no_se_sabe: 'No se sabe' };
+const siNo = { type: 'string', enum: Object.keys(SI_NO) };
+
 const SCHEMA_C = obj({
   resumen: str,
   revisiones: arr(obj({
@@ -72,6 +83,16 @@ const SCHEMA_C = obj({
     inicio: num,
     fin: num,
     veredicto: { type: 'string', enum: Object.keys(VEREDICTOS) },
+    motivo: str,
+  })),
+  munecas: arr(obj({
+    inicio: num,
+    fin: num,
+    lado: { type: 'string', enum: ['izq', 'dch'] },
+    flexion: { type: 'string', enum: Object.keys(MUNECA_FLEXION) },
+    desviada: siNo,
+    girada: siNo,
+    confianza: { type: 'string', enum: ['alta', 'media', 'baja'] },
     motivo: str,
   })),
   contexto: CONTEXTO,
@@ -158,6 +179,17 @@ Reglas:
 - Si hay varias personas, revisa solo el esqueleto del trabajador principal.
 - En resumen, describe en dos o tres frases la calidad general del esqueleto y sus fallos típicos.
 - En las fases de la tarea, indica el riesgo ergonómico de cada una (alto, medio o bajo).
+
+Muñecas (en «munecas»): MediaPipe no mide bien la muñeca, así que la estimas tú mirando la imagen ORIGINAL
+(mitad izquierda). Da una entrada por cada fase de la tarea (mismos inicio y fin que en «fases») y por cada lado
+(izq y dch, del trabajador), con la postura más exigente de la muñeca en esa fase:
+- flexion: neutra (mano alineada con el antebrazo), hasta_15 (flexión o extensión de hasta unos 15°),
+  mas_15 (más de 15°) o no_visible (la mano está tapada, fuera del encuadre o demasiado pequeña para juzgarla).
+- desviada: si la mano se desvía hacia el pulgar o hacia el meñique (desviación radial o cubital).
+- girada: si la muñeca está girada cerca del final de su recorrido (pronación o supinación extrema).
+- confianza: alta si la mano se ve bien; media si se ve en parte; baja si apenas se distingue.
+- motivo: qué ves, en una frase (por ejemplo, «sujeta la gaveta con la muñeca extendida»).
+No deduzcas: si no ves la mano, usa no_visible y «no_se_sabe». Es una estimación por categorías, no una medida.
 
 Contexto que debes aportar además: la tarea, sus fases, si manipula una carga (y su peso aproximado si se
 puede estimar), el agarre, los tramos con torsión o inclinación lateral del tronco, el apoyo de las piernas
@@ -303,3 +335,19 @@ export const viewC = (result, frames, opts) => cleanWithArgon(result, frames, { 
 
 /** Escenario D: revisión de Argon y, después, los filtros mecánicos. */
 export const viewD = (result, frames, opts) => cleanWithArgon(result, frames, { ...opts, reglas: true });
+
+/**
+ * Muñecas de Argon como serie sobre `times`: por lado, categoría 0 (neutra), 1 (hasta 15°),
+ * 2 (más de 15°) o null (no visible o sin dato). Si se solapan tramos, se queda la más exigente.
+ */
+export function wristSeries(result, times) {
+  const CAT = { neutra: 0, hasta_15: 1, mas_15: 2 };
+  const out = { L: times.map(() => null), R: times.map(() => null) };
+  for (const m of result?.json.munecas || []) {
+    const c = CAT[m.flexion];
+    if (c == null || !Number.isFinite(m.inicio) || !Number.isFinite(m.fin)) continue;
+    const s = out[m.lado === 'izq' ? 'L' : 'R'];
+    times.forEach((t, i) => { if (t >= m.inicio && t < m.fin && (s[i] == null || c > s[i])) s[i] = c; });
+  }
+  return out;
+}

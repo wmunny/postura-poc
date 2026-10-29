@@ -256,3 +256,6 @@ dialog p { margin: 0 0 8px; }
 .advice ul { margin: 4px 0 0; padding-left: 18px; }
 .advice .rec { color: var(--text-secondary); font-style: italic; }
 .stats td.lv { white-space: nowrap; }
+.chart-note { margin: 0 0 4px; }
+.stats.text th, .stats.text td { text-align: left; }
+.verdict .wrist { margin-top: 6px; font-size: 0.8rem; color: var(--text-secondary); }

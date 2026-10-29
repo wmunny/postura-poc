@@ -10,6 +10,8 @@
 //   4. extremos   — peor y mejor caso: % de tiempo en postura de riesgo si todo lo que no se ve
 //                   estuviera, o no, en esa postura. ¿Cambia la conclusión?
 //   5. pico       — ¿puede estar oculta la postura más exigente en un hueco largo?
+// La muñeca no se mide: la estima Argon por categorías y fases (escenario C). Su comprobación es si
+// hay categoría, con confianza suficiente, en cada fase (y sobre todo en las de riesgo alto).
 // Dos perspectivas: «tiempo» (1-4, métodos por proporción de tiempo como OWAS) y «pico» (1, 2 y 5,
 // métodos que puntúan la peor postura como REBA y RULA). Los umbrales están en config.js (VALIDACION)
 // y son convenciones iniciales que hay que calibrar con un ergónomo.
@@ -141,20 +143,51 @@ function checkAngle(id, values, times, phases, aprox) {
 }
 
 const fmtS = (t) => `${t.toFixed(1)} s`;
+const best = (...vs) => NIVELES[Math.min(...vs.map((v) => NIVELES.indexOf(v)))];
+const MUNECA_CAT = { neutra: 0, hasta_15: 1, mas_15: 2 };
+
+/**
+ * Muñeca de un lado: en cada fase, la entrada de Argon que más se solapa con ella.
+ * Rojo si falta en una fase de riesgo alto; ámbar si falta en otra fase o solo hay confianza baja.
+ */
+function checkWrist(entries, lado, phases) {
+  const mine = entries.filter((m) => m.lado === lado && Number.isFinite(m.inicio) && Number.isFinite(m.fin));
+  const fases = phases.map((f) => {
+    const ov = (m) => Math.max(0, Math.min(f.fin, m.fin) - Math.max(f.inicio, m.inicio));
+    const m = mine.reduce((b, x) => (ov(x) > (b ? ov(b) : 0) ? x : b), null);
+    const visible = m && MUNECA_CAT[m.flexion] != null;
+    const nivel = visible && m.confianza !== 'baja' ? 'verde' : f.riesgo === 'alto' ? 'rojo' : 'ambar';
+    return { ...f, flexion: m?.flexion ?? null, confianza: m?.confianza ?? null, nivel };
+  });
+  const vistas = fases.filter((f) => MUNECA_CAT[f.flexion] != null);
+  return {
+    lado,
+    nivel: worst(...fases.map((f) => f.nivel)),
+    fases,
+    categoriaMax: vistas.length ? Math.max(...vistas.map((f) => MUNECA_CAT[f.flexion])) : null,
+  };
+}
 
 /**
  * Valida el vídeo con una serie ya limpiada.
- * @param {{times:number[], series:Object, aprox?:Object, phases:Array, fuente:string}} input
+ * `munecas`: entradas de Argon (escenario C) o null si no se ha ejecutado.
+ * @param {{times:number[], series:Object, aprox?:Object, phases:Array, fuente:string, munecas?:Array}} input
  */
-export function validateVideo({ times, series, aprox = {}, phases, fuente }) {
+export function validateVideo({ times, series, aprox = {}, phases, fuente, munecas = null }) {
   const angulos = Object.fromEntries(ANGLE_DEFS.map((d) => [d.id, checkAngle(d.id, series[d.id], times, phases, aprox[d.id])]));
   const regiones = V.regiones.map((reg) => {
     const a = reg.angulos.map((id) => angulos[id]);
     return { ...reg, tiempo: worst(...a.map((x) => x.tiempo)), pico: worst(...a.map((x) => x.pico)), detalle: a };
   });
-  const metodos = V.metodos.map((m) => ({
-    ...m, nivel: worst(...m.angulos.map((id) => angulos[id][m.perspectiva])),
-  }));
+  const wrists = munecas ? { L: checkWrist(munecas, 'izq', phases), R: checkWrist(munecas, 'dch', phases) } : null;
+  const metodos = V.metodos.map((m) => {
+    const nivelAngulos = worst(...m.angulos.map((id) => angulos[id][m.perspectiva]));
+    let nivelMuneca = null;
+    if (m.muneca && wrists) {
+      nivelMuneca = m.muneca === 'una' ? best(wrists.L.nivel, wrists.R.nivel) : worst(wrists.L.nivel, wrists.R.nivel);
+    }
+    return { ...m, nivelAngulos, nivelMuneca, nivel: worst(nivelAngulos, nivelMuneca) };
+  });
 
   // Qué falta y cómo arreglarlo
   const consejos = [];
@@ -181,5 +214,21 @@ export function validateVideo({ times, series, aprox = {}, phases, fuente }) {
     }
     consejos.push({ region: reg.label, nivel: worst(reg.pico, reg.tiempo), mensajes: msgs, grabacion: reg.consejo });
   }
-  return { fuente, angulos, regiones, metodos, consejos, fasesDeArgon: phases.some((f) => f.deArgon) };
+  if (wrists) {
+    const msgs = [];
+    for (const w of [wrists.L, wrists.R]) {
+      const lado = w.lado === 'izq' ? 'izquierda' : 'derecha';
+      const faltan = w.fases.filter((f) => f.nivel !== 'verde');
+      if (faltan.length) {
+        msgs.push(`Muñeca ${lado}: sin categoría fiable en ${faltan.map((f) => `«${f.descripcion}» (${fmtS(f.inicio)}–${fmtS(f.fin)}${f.flexion === 'no_visible' || !f.flexion ? ', no visible' : ', confianza baja'}${f.riesgo === 'alto' ? ', fase de riesgo alto' : ''})`).join('; ')}.`);
+      }
+    }
+    if (msgs.length) {
+      consejos.push({
+        region: 'Muñecas (estimación de Argon)', nivel: worst(wrists.L.nivel, wrists.R.nivel), mensajes: msgs,
+        grabacion: 'Acerca la cámara o graba en mayor resolución para que las manos se vean grandes, sin la carga ni el cuerpo delante.',
+      });
+    }
+  }
+  return { fuente, angulos, regiones, metodos, munecas: wrists, consejos, fasesDeArgon: phases.some((f) => f.deArgon) };
 }

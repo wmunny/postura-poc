@@ -48,6 +48,19 @@ En las gráficas, la línea tenue es siempre MediaPipe en bruto. La tabla *Ganan
 3. El código quita los puntos mal colocados o no visibles (cada tramo se amplía medio intervalo de muestreo), conserva marcados los aproximados, recalcula los ángulos, rellena los huecos de menos de 1 s y deja vacíos los más largos. D aplica después los filtros mecánicos.
 4. En el vídeo, los puntos rechazados llevan una **cruz roja** y los aproximados un **anillo ámbar**; en las gráficas, los tramos revisados van **sombreados** en rojo o ámbar.
 
+### Muñecas (estimación de Argon)
+
+MediaPipe Pose no mide la muñeca con fiabilidad: los puntos de la mano son toscos y, con una sola cámara, suelen quedar tapados. En el escenario C, Argon la **clasifica por fases y lados**, como la usan REBA y RULA:
+
+| Campo | Valores |
+|---|---|
+| Flexión / extensión | neutra · hasta 15° · más de 15° · no visible |
+| Desviada (radial o cubital) | sí · no · no se sabe |
+| Girada (cerca del final del recorrido) | sí · no · no se sabe |
+| Confianza | alta · media · baja |
+
+Se muestra en la tabla *Muñecas*, en la gráfica *Muñeca · flexión (categoría)* y en el *Fotograma actual*. Es una **estimación visual, no una medida**, y puede variar entre ejecuciones. Para medir la muñeca en grados haría falta MediaPipe Hand Landmarker y manos grandes y visibles en el vídeo.
+
 ### Ganancia de la limpieza
 
 Sobre las series sin suavizar, en el modo de ángulos activo:
@@ -76,7 +89,7 @@ Un semáforo dice si lo que se ve es **representativo** de la tarea, sobre la me
 | 4 | Peor y mejor caso | ¿Cambia la conclusión si lo que no se ve estuviera todo, o nada, en postura de riesgo? |
 | 5 | Pico | ¿Puede estar oculta la peor postura en un hueco largo? |
 
-El veredicto se da por **método**: REBA y RULA (peor postura: 1, 2 y 5) y OWAS (% del tiempo: 1 a 4), y por **región** (tronco y cuello, piernas, brazo izquierdo, brazo derecho), con consejos de grabación. Las categorías de postura siguen los umbrales de REBA. Todos los umbrales están en `js/config.js` (`VALIDACION`) y son convenciones iniciales a calibrar con un ergónomo.
+El veredicto se da por **método**: REBA y RULA (peor postura: 1, 2 y 5) y OWAS (% del tiempo: 1 a 4), y por **región**. En REBA y RULA cuenta también la **muñeca** de Argon: rojo si falta en una fase de riesgo alto, ámbar si falta en otra o solo hay confianza baja; en REBA cuentan los dos lados y en RULA basta con uno (tronco y cuello, piernas, brazo izquierdo, brazo derecho), con consejos de grabación. Las categorías de postura siguen los umbrales de REBA. Todos los umbrales están en `js/config.js` (`VALIDACION`) y son convenciones iniciales a calibrar con un ergónomo.
 
 ### Clave de la API de Gemini
 

@@ -9,7 +9,9 @@ import { AngleChart } from './charts.js';
 import { drawOverlay, Viewer3D } from './render.js';
 import { exportAnglesCSV, exportLandmarksCSV, exportJSON, downloadBlob, baseName } from './export.js';
 import { setApiKey, hasApiKey } from './gemini.js';
-import { runB, runC, viewB, viewC, viewD, argonFrames, argonPoseAt, PUNTOS, VEREDICTOS } from './argon.js';
+import {
+  runB, runC, viewB, viewC, viewD, argonFrames, argonPoseAt, wristSeries, PUNTOS, VEREDICTOS, MUNECA_FLEXION, SI_NO,
+} from './argon.js';
 
 const $ = (s) => document.querySelector(s);
 const video = $('#video');
@@ -26,6 +28,8 @@ const state = {
   scenario: 'A0',
   views: {},          // A0 (bruto), A1 (filtros mecánicos), B, C (Argon), D (reglas + Argon)
   validacion: null,
+  wrist: null,        // muñecas de Argon como serie: { L, R } con categorías 0, 1, 2 o null
+  wristChart: null,
   argon: { B: null, C: null },
   argonPoses: null,   // puntos 2D de Argon (escenario B) con el formato de MediaPipe
   videos: null,       // { ladoALado, superpuesto }: vídeos con el esqueleto de MediaPipe en bruto
@@ -263,11 +267,22 @@ function buildCharts() {
     const series = ANGLE_DEFS.filter((d) => d.group === g.id)
       .map((d) => ({ id: d.id, label: d.side === 'C' ? d.label : (d.side === 'L' ? 'Izq.' : 'Dch.'), side: d.side }));
     const chart = new AngleChart(box, { title: g.label, series });
-    chart.onHover = (t) => state.charts.forEach((c) => c.setHover(t));
+    chart.onHover = (t) => allCharts().forEach((c) => c.setHover(t));
     chart.onSeek = (t) => { video.currentTime = t; };
     return chart;
   });
+  state.wristChart = new AngleChart(box, {
+    title: 'Muñeca · flexión (categoría)',
+    series: [{ id: 'muneca_L', label: 'Izq.', side: 'L' }, { id: 'muneca_R', label: 'Dch.', side: 'R' }],
+    yLabels: WRIST_LABELS,
+    note: 'Estimada por Argon (escenario C) por fases, no medida.',
+  });
+  state.wristChart.onHover = (t) => allCharts().forEach((c) => c.setHover(t));
+  state.wristChart.onSeek = (t) => { video.currentTime = t; };
 }
+
+const WRIST_LABELS = ['Neutra', '≤ 15°', '> 15°'];
+const allCharts = () => [...state.charts, ...(state.wristChart ? [state.wristChart] : [])];
 
 const baseOpts = () => ({ mode: state.mode, width: state.meta.width, height: state.meta.height });
 
@@ -291,6 +306,9 @@ function recompute() {
   const ghost = state.scenario === 'A0' ? null : A0.series;
   const bands = state.computed.bandas || null;
   state.charts.forEach((c, k) => c.setData(state.computed.times, state.computed.series, ghost, bands?.[GROUPS[k].id]));
+  state.wrist = state.argon.C ? wristSeries(state.argon.C, A0.times) : null;
+  state.wristChart.setData(A0.times, { muneca_L: state.wrist?.L || [], muneca_R: state.wrist?.R || [] });
+  renderWrists();
   renderGhostNote();
   renderStats();
   renderFilters(A1);
@@ -417,6 +435,25 @@ function renderCompare(V) {
   $('#compare-table').innerHTML = `<thead>${head}</thead><tbody>${body}</tbody>`;
 }
 
+/** Muñecas de Argon por fase y lado. */
+function renderWrists() {
+  const items = state.argon.C?.json.munecas || [];
+  $('#wrists').hidden = !items.length;
+  if (!items.length) return;
+  const conf = { alta: 'alta', media: 'media', baja: 'baja' };
+  const rows = items.slice().sort((a, b) => a.inicio - b.inicio || (a.lado > b.lado ? 1 : -1)).map((m) => `<tr>
+    <td>${fmtT(m.inicio)}–${(Number(m.fin) || 0).toFixed(1)} s</td>
+    <td><i class="sw side-${m.lado === 'izq' ? 'L' : 'R'}"></i>${m.lado === 'izq' ? 'Izquierda' : 'Derecha'}</td>
+    <td><b>${esc(MUNECA_FLEXION[m.flexion] || m.flexion)}</b></td>
+    <td>${esc(SI_NO[m.desviada] || m.desviada)}</td><td>${esc(SI_NO[m.girada] || m.girada)}</td>
+    <td>${esc(conf[m.confianza] || m.confianza)}</td><td>${esc(m.motivo)}</td></tr>`).join('');
+  $('#wrists-table').innerHTML = `<thead><tr><th>Fase</th><th>Lado</th><th>Flexión / extensión</th><th>Desviada</th><th>Girada</th><th>Confianza</th><th>Qué ve Argon</th></tr></thead><tbody>${rows}</tbody>`;
+}
+$('#wrists').addEventListener('click', (e) => {
+  const b = e.target.closest('.tlink');
+  if (b) { video.currentTime = Number(b.dataset.t); video.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+});
+
 const LIGHT = { verde: 'Verde', ambar: 'Ámbar', rojo: 'Rojo' };
 const light = (lv, text = LIGHT[lv]) => `<i class="light ${lv}" title="${LIGHT[lv]}"></i>${text}`;
 
@@ -427,13 +464,15 @@ function renderValidation(V) {
   const val = validateVideo({
     times: state.views.A0.times, series: V[src].series, aprox: V[src].aprox,
     phases: phasesFor(fases, video.duration || state.meta.duracion_s), fuente: METHOD_NAMES[src],
+    munecas: state.argon.C?.json.munecas || null,
   });
   state.validacion = val;
   $('#validation-source').textContent = `· sobre «${METHOD_NAMES[src]}», ángulos ${state.mode.toUpperCase()}${val.fasesDeArgon ? ', fases de Argon' : ', 5 tramos iguales (ejecuta C para usar las fases de la tarea)'}`;
 
   $('#validation-methods').innerHTML = val.metodos.map((mt) => `<div class="verdict">
     ${light(mt.nivel, `<b>${mt.id}</b>`)} · ${mt.perspectiva === 'pico' ? 'peor postura' : '% del tiempo'}
-    <p>${{ verde: 'El vídeo es representativo para este método.', ambar: 'Utilizable con cautela: revisa los avisos.', rojo: 'No es representativo: lo que no se ve puede cambiar el resultado.' }[mt.nivel]} ${esc(mt.nota)}</p></div>`).join('');
+    <p>${{ verde: 'El vídeo es representativo para este método.', ambar: 'Utilizable con cautela: revisa los avisos.', rojo: 'No es representativo: lo que no se ve puede cambiar el resultado.' }[mt.nivel]} ${esc(mt.nota)}</p>
+    ${mt.muneca ? `<div class="wrist">Ángulos: ${light(mt.nivelAngulos)} · Muñeca${mt.muneca === 'una' ? ' (basta un lado)' : ''}: ${mt.nivelMuneca ? light(mt.nivelMuneca) : 'sin estimar (ejecuta C)'}</div>` : ''}</div>`).join('');
 
   const pc = (x) => (x == null ? '—' : `${x.toFixed(0)} %`);
   const rows = val.regiones.flatMap((reg) => [
@@ -473,13 +512,16 @@ function syncToVideo() {
   const rejected = state.scenario === 'C' || state.scenario === 'D' ? state.views[state.scenario]?.rejected[i] : null;
   drawOverlay(overlay, video, frame, { showMP: $('#show-mp').checked, argon, rejected });
   viewer.setFrame(frame);
-  state.charts.forEach((c) => c.setPlayhead(t));
+  allCharts().forEach((c) => c.setPlayhead(t));
   $('#cur-time').textContent = `· ${t.toFixed(2)} s`;
   const { series } = state.computed;
   $('#now-table').innerHTML = ANGLE_DEFS.map((d) => {
     const v = series[d.id][i];
     return `<tr><td><i class="sw side-${d.side}"></i> ${d.label}</td><td>${v == null ? '—' : v.toFixed(0) + '°'}</td></tr>`;
-  }).join('');
+  }).join('') + (state.wrist ? ['L', 'R'].map((s) => {
+    const c = state.wrist[s][i];
+    return `<tr><td><i class="sw side-${s}"></i> Muñeca ${s === 'L' ? 'izq.' : 'dch.'} <span class="muted">(Argon)</span></td><td>${c == null ? '—' : WRIST_LABELS[c]}</td></tr>`;
+  }).join('') : '');
 }
 
 function loop() {
@@ -654,8 +696,9 @@ $('#exp-json').addEventListener('click', () => exportJSON(state.meta, state.fram
   filtros: FILTROS,
   validacion: state.validacion && {
     fuente: state.validacion.fuente, modo: state.mode,
-    metodos: state.validacion.metodos.map(({ id, perspectiva, nivel }) => ({ id, perspectiva, nivel })),
+    metodos: state.validacion.metodos.map(({ id, perspectiva, nivel, nivelAngulos, nivelMuneca }) => ({ id, perspectiva, nivel, nivelAngulos, nivelMuneca })),
     angulos: state.validacion.angulos,
+    munecas: state.validacion.munecas,
   },
   escenarios: Object.fromEntries(['B', 'C'].filter((k) => state.argon[k]).map((k) => {
     const { json, fps, thinking, segundos } = state.argon[k];

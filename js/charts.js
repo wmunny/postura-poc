@@ -4,14 +4,16 @@
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
 export class AngleChart {
-  constructor(container, { title, series }) {
+  /** `yLabels`: si se pasa, el eje Y son categorías (0, 1, 2…) con esas etiquetas en vez de grados. */
+  constructor(container, { title, series, yLabels = null, note = '' }) {
     this.series = series; // [{id, label, side}]
+    this.yLabels = yLabels;
     this.el = document.createElement('figure');
     this.el.className = 'chart-card';
     const legend = series.length > 1
       ? `<div class="legend">${series.map((s) => `<span class="key"><i class="sw side-${s.side}"></i>${s.label}</span>`).join('')}</div>`
       : '';
-    this.el.innerHTML = `<figcaption><span class="chart-title">${title}</span>${legend}</figcaption>
+    this.el.innerHTML = `<figcaption><span class="chart-title">${title}</span>${legend}</figcaption>${note ? `<p class="micro chart-note">${note}</p>` : ''}
       <div class="chart-wrap"><canvas></canvas><div class="tooltip" hidden></div></div>`;
     container.appendChild(this.el);
     this.canvas = this.el.querySelector('canvas');
@@ -23,7 +25,7 @@ export class AngleChart {
     this.playT = null;
     this.onSeek = null;
     this.onHover = null;
-    this.pad = { l: 34, r: 10, t: 8, b: 20 };
+    this.pad = { l: yLabels ? 62 : 34, r: 10, t: 8, b: 20 };
 
     const pos = (e) => {
       const r = this.canvas.getBoundingClientRect();
@@ -46,7 +48,7 @@ export class AngleChart {
     this.bands = bands;
     const vals = this.series.flatMap((s) => [...(data[s.id] || []), ...(ghost?.[s.id] || [])]).filter((v) => v != null);
     const max = vals.length ? Math.max(...vals) : 90;
-    this.yMax = Math.max(60, Math.ceil(max / 30) * 30);
+    this.yMax = this.yLabels ? this.yLabels.length - 1 : Math.max(60, Math.ceil(max / 30) * 30);
     this.tMax = times.length ? times[times.length - 1] : 1;
     this.draw();
   }
@@ -59,6 +61,7 @@ export class AngleChart {
     return Math.max(0, Math.min(this.tMax, t));
   }
   vToY(v) { return this.pad.t + (1 - v / this.yMax) * (this.h - this.pad.t - this.pad.b); }
+  fmt(v) { return v == null ? '—' : this.yLabels ? this.yLabels[Math.round(v)] : `${v.toFixed(0)}°`; }
 
   indexAt(t) {
     const a = this.times;
@@ -78,8 +81,8 @@ export class AngleChart {
     const rows = this.series.map((s) => {
       const v = this.data[s.id]?.[i];
       const g = this.ghost?.[s.id]?.[i];
-      const ref = this.ghost && g !== v ? ` <span class="muted">(${g == null ? '—' : g.toFixed(0) + '°'})</span>` : '';
-      return `<div class="row"><i class="sw side-${s.side}"></i><span>${s.label}</span><b>${v == null ? '—' : v.toFixed(0) + '°'}${ref}</b></div>`;
+      const ref = this.ghost && g !== v ? ` <span class="muted">(${this.fmt(g)})</span>` : '';
+      return `<div class="row"><i class="sw side-${s.side}"></i><span>${s.label}</span><b>${this.fmt(v)}${ref}</b></div>`;
     }).join('');
     this.tooltip.innerHTML = `<div class="tt-time">${this.times[i].toFixed(2)} s</div>${rows}`;
     this.tooltip.hidden = false;
@@ -103,13 +106,13 @@ export class AngleChart {
     ctx.textBaseline = 'middle';
 
     // Rejilla y eje Y
-    const stepY = this.yMax > 120 ? 60 : 30;
+    const stepY = this.yLabels ? 1 : this.yMax > 120 ? 60 : 30;
     for (let v = 0; v <= this.yMax; v += stepY) {
       const y = Math.round(this.vToY(v)) + 0.5;
       ctx.strokeStyle = grid; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(this.pad.l, y); ctx.lineTo(w - this.pad.r, y); ctx.stroke();
       ctx.fillStyle = muted; ctx.textAlign = 'right';
-      ctx.fillText(`${v}°`, this.pad.l - 6, y);
+      ctx.fillText(this.yLabels ? this.yLabels[v] : `${v}°`, this.pad.l - 6, y);
     }
     // Eje X
     if (this.times.length) {

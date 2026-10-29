@@ -111,12 +111,22 @@ Además, sus ángulos **aplastan los extremos**: el percentil 95 de B es menor q
 
 | Método | Veredicto | Por qué |
 |---|---|---|
-| REBA (peor postura) | 🔴 | Los brazos casi no se ven: hombro izquierdo en el 5 % del vídeo, ausente en las fases de riesgo alto |
+| REBA (peor postura) | 🔴 | Los brazos casi no se ven: hombro izquierdo en el 5 % del vídeo, ausente en las fases de riesgo alto. La muñeca no se medía (ver 5 ter) |
 | RULA (peor postura) | 🔴 | Lo mismo; se podría evaluar solo el lado que se vea bien, pero aquí tampoco el derecho llega |
 | OWAS (% del tiempo) | 🔴 | El vídeo es corto: el % de tiempo con el tronco en riesgo tiene un margen de ±33 puntos; para ±10 harían falta unos 5 minutos de grabación |
 
 - Por regiones: **tronco y cuello en verde** para la peor postura (se ven en todas las fases); **piernas y brazos en rojo**.
 - El sistema **dice no**, explica por qué y propone cómo grabar: «Pon la cámara en el lado izquierdo del trabajador o añade una segunda cámara: de espaldas o de perfil derecho, el torso tapa este brazo.»
+
+## 5 ter. La muñeca: lo que una cámara no mide, la IA lo clasifica
+
+- MediaPipe Pose apenas ve las manos: en el vídeo de prueba, la muñeca izquierda es visible en el 35 % de los fotogramas y la derecha en el 51 %, y sus puntos son demasiado toscos para medir grados.
+- REBA y RULA no necesitan grados exactos de muñeca, sino **categorías**: neutra, hasta 15°, más de 15°, desviada y girada.
+- Por eso se lo pedimos a Gemini 4 Argon **por fases y lados, con su nivel de confianza**, y con la instrucción de decir «no visible» en lugar de adivinar.
+- Entra en el semáforo: en REBA cuentan las dos muñecas; en RULA basta con el lado que se vea bien.
+- Es otra forma de combinar: la visión clásica mide lo que ve bien; la IA clasifica lo que solo se puede juzgar mirando, y dice cuándo no puede.
+
+*(Pendiente: resultados con la API real y variación entre ejecuciones.)*
 
 ## 6 bis. Validación estadística del vídeo
 

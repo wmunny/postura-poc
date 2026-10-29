@@ -12,7 +12,8 @@ El objetivo final es una **skill** que un asistente (Gemini, Claude u otro con M
 | 2 | Escenarios A · B · C (MediaPipe, Gemini 4 Argon, mixto) | Hecho (v0.2); probado con la API real |
 | 2b | Esqueleto de Argon sobre el vídeo (puntos 2D por fotograma) | Hecho (v0.3); probado: no sirve para medir |
 | 2c | C · Argon revisor: revisa el vídeo con el esqueleto de MediaPipe y se miden las ganancias | Hecho (v0.4); probado con la API real |
-| 2d | D · Reglas + Argon, cálculo con el lado visible, veredicto «aproximada» y semáforo de validez | Hecho (v0.5), pendiente de probar con la API real |
+| 2d | D · Reglas + Argon, cálculo con el lado visible, veredicto «aproximada» y semáforo de validez | Hecho (v0.5); probado con la API real |
+| 2e | Muñeca por categorías (fase y lado) estimada por Argon, en la tabla, la gráfica y el semáforo | Hecho (v0.6), pendiente de probar con la API real |
 | 3 | Validación de los escenarios frente a una referencia | Pendiente |
 | 4 | Módulo `ergo`: REBA, RULA y OWAS | Pendiente |
 | 5 | Motor sin interfaz (Python) | Pendiente |
@@ -60,6 +61,10 @@ Se compara MediaPipe en bruto, con filtros mecánicos y con la revisión de Argo
 - **Lado visible**: si un punto está rechazado, el ángulo se calcula con el otro lado.
 - **Aproximada**: Argon puede conservar un punto desplazado si la postura es la correcta (útil para categorías de REBA).
 - **Semáforo de validez**: cinco comprobaciones estadísticas por articulación (cobertura, fases, muestra efectiva, peor y mejor caso, pico), veredicto por método (REBA, RULA, OWAS) y por región, y consejos de grabación.
+
+## 2e. Muñeca por categorías (hecho)
+
+MediaPipe Pose no mide la muñeca con fiabilidad. En la misma llamada de C, Argon la clasifica por fase y lado (neutra, hasta 15°, más de 15° o no visible; desviada; girada; confianza), que es lo que piden REBA y RULA. Entra en el semáforo: en REBA cuentan los dos lados y en RULA basta con uno. Pendiente: medir su variación entre ejecuciones y, para vídeos con las manos visibles, probar MediaPipe Hand Landmarker.
 
 ## 3. Validación (siguiente)
 
