@@ -1,10 +1,12 @@
 # Hallazgos para el artículo: medir posturas de trabajo desde un vídeo de móvil
 
-*Borrador de trabajo, 29 de octubre de 2026. Base para un artículo de LinkedIn. Las cifras salen de la PoC [`postura-poc`](https://wmunny.github.io/postura-poc/) y de un único vídeo real, así que son indicios, no conclusiones validadas.*
+*Borrador de trabajo, 29 de octubre de 2026. Base para un artículo de LinkedIn. Las cifras salen de la PoC [`postura-poc`](https://wmunny.github.io/postura-poc/), de dos vídeos (uno real y otro sintético) y de varias ejecuciones de la IA, así que son indicios, no conclusiones validadas.*
 
 ## Idea central
 
 > Un modelo de visión con lenguaje **entiende** la escena, pero **no mide** el cuerpo. La visión artificial clásica mide, pero se equivoca cuando no ve. La combinación útil no es pedirle ángulos a la IA generativa, sino ponerla a **revisar** lo que mide la visión clásica.
+>
+> Y el matiz que dieron las pruebas: la IA es un **buen auditor**, pero un **mal filtro automático**. Aporta, siempre que no tenga la última palabra (ver el veredicto, apartado 6 ter).
 
 ## 1. El problema
 
@@ -102,7 +104,7 @@ Además, sus ángulos **aplastan los extremos**: el percentil 95 de B es menor q
 | Solo Argon | 39 | 23 | 57 % |
 | **Reglas + Argon** | **31** | **4** | **56 %** (respaldada por la imagen) |
 
-- La combinación consigue **la estabilidad de las reglas** (−23 % de fluctuación, −84 % de saltos) **y la honestidad de la IA** (quita la cuarta parte de datos inventados que las reglas no ven). Ninguno de los dos lo logra solo.
+- La combinación consigue **la estabilidad de las reglas** (−23 % de fluctuación, −84 % de saltos) **y la honestidad de la IA** (quita la cuarta parte de datos inventados que las reglas no ven). Ninguno de los dos lo logra solo *en este vídeo*. Las pruebas siguientes (5 quater y 5 quinquies) matizan esta conclusión.
 - Calcular con el **lado visible** recupera el tronco del 71 % al 98 %, y el cuello del 67 % al 89 %.
 - Si el hombro izquierdo del cuadro eléctrico se marca como *aproximado* en lugar de *mal colocado* (simulación: reclasificamos ese tramo a mano; la nueva versión se lo pide a Argon), su cobertura pasa del 5 % al 27 %, y la postura de riesgo deja de desaparecer.
 - Efecto secundario instructivo: cambiar de cálculo (de dos lados a uno) introduce pequeños saltos que las reglas limpian. Otro motivo para combinar.
@@ -126,7 +128,74 @@ Además, sus ángulos **aplastan los extremos**: el percentil 95 de B es menor q
 - Entra en el semáforo: en REBA cuentan las dos muñecas; en RULA basta con el lado que se vea bien.
 - Es otra forma de combinar: la visión clásica mide lo que ve bien; la IA clasifica lo que solo se puede juzgar mirando, y dice cuándo no puede.
 
-*(Pendiente: resultados con la API real y variación entre ejecuciones.)*
+**Resultado real (vídeo del taller)**: la IA marcó «no visible» donde las manos están tapadas por la gaveta o el torso (con confianza baja) y dio categorías razonables donde se ven: en el cuadro eléctrico, una muñeca en extensión pulsando el botón y la otra apoyada en pronación sobre la tapa. Pero en esa misma ejecución **asignó los lados al revés** (ver 5 quater), así que las categorías eran razonables pero estaban en la mano equivocada. **Resultado real (vídeo de paletizado)**: categorías coherentes y con confianza alta: neutras en reposo, desviación cubital al coger la caja por las esquinas y extensión con pronación al dejarla.
+
+## 5 quater. La IA también se equivoca, y con seguridad
+
+Tercera ejecución de la revisión (C) sobre el vídeo del taller. En el cuadro eléctrico, el trabajador está de perfil y mirando a la derecha de la imagen: el brazo que cuelga delante del torso es el **derecho** y el que sube al cuadro, por detrás de la cabeza, es el **izquierdo**. MediaPipe lo tenía bien, y las dos ejecuciones anteriores de Argon también.
+
+Esta ejecución afirmó lo contrario: *«Inversión completa de lateralidad: el modelo asigna el lado izquierdo al hombro derecho real.»* Era falso. Consecuencias:
+
+- Rechazó hombros, codos, muñecas y caderas de **los dos lados** durante 7 s. Con los dos hombros rechazados, ni siquiera el cálculo por el lado visible pudo salvar el tronco, que cayó del 99 % al 70 % en una fase clave.
+- La cobertura de Reglas + Argon bajó al **41 %** (frente al 56 % de la ejecución anterior): 905 valores descartados, muchos correctos.
+- Las muñecas y las observaciones de esa ejecución hablaban del «brazo derecho por encima de 90°», en el lado equivocado.
+
+**Lección**: en una de tres ejecuciones, la IA «corrigió» un esqueleto que estaba bien, sin dudar y con una explicación convincente. Distinguir el lado del cuerpo con una cámara y el trabajador de perfil es difícil también para un modelo grande. **No puede tener la última palabra**: hace falta consenso entre ejecuciones, comprobación con datos propios (la profundidad 3D dice qué hombro está más cerca de la cámara) o revisión humana de los tramos críticos.
+
+## 5 quinquies. Segundo vídeo: un caso bueno (paletizado, sintético)
+
+Para contrastar, un vídeo **generado con IA** y diseñado para salir bien: 10 s, 1280×720, un trabajador coge cajas de una cinta de rodillos y las deja en un palé en el suelo, con el cuerpo entero a la vista. *(Al ser sintético no hay problema de privacidad, pero tampoco sirve como validación: está hecho para que funcione.)*
+
+**MediaPipe y las reglas**: persona detectada en el 100 % de los fotogramas, el 98 % de visibilidad; las reglas no tuvieron nada que quitar. El semáforo dio **verde para REBA y RULA** en los ángulos (OWAS en rojo solo porque 10 s es poco para estimar porcentajes de tiempo). La postura de riesgo, al dejar la caja en el palé, se ve con claridad: espalda doblada unos 57° con las rodillas casi rectas, el levantamiento «de espalda» que REBA penaliza.
+
+**Con la revisión de la IA**:
+
+| Método | Fluctuación (°/s) | Saltos imposibles | Cobertura | Semáforo REBA (ángulos) |
+|---|---|---|---|---|
+| MediaPipe en bruto | 28 | 0 | 99 % | 🟢 |
+| Solo reglas | 28 | 0 | 99 % | 🟢 |
+| Solo Argon | 26 | 0 | 67 % | — |
+| Reglas + Argon | 26 | 0 | 66 % | 🔴 |
+
+- Argon quitó 335 valores, casi todos «no visible»: el hombro, el codo o la cadera del **lado alejado** de la cámara durante giros de **0,5 a 1,5 s**. Es literalmente cierto (quedan detrás del torso), pero MediaPipe los estima bien: el cuerpo es rígido y, si se ve una cadera, la otra está casi determinada.
+- Resultado: la serie se trocea (de 10 a 22 tramos) y el semáforo pasa de **verde a rojo**. **En un vídeo bueno, la IA empeoró el resultado.**
+- Lo que sí aportó, y mucho: **contexto** (paletizado de unos 5 kg, giro del tronco de 25–30° sin mover los pies, agarre regular por las esquinas, el depósito bajo como fase de riesgo alto) y **muñecas** coherentes con confianza alta.
+- Otro detalle técnico: con la cámara casi frontal, el ángulo 2D del tronco se queda en 44° y el 3D da 57°. **Elegir bien entre 2D y 3D según la orientación de la cámara** puede cambiar la categoría de REBA.
+
+## 6 ter. Veredicto: ¿aporta tener la IA verificando junto a las reglas?
+
+**Sí aporta, pero no como filtro automático tal como lo probamos. La mejor opción es: reglas siempre, IA como auditor y como fuente de lo que la cámara no mide, y una política de decisión explícita para lo que se borra.**
+
+Lo que dicen las pruebas:
+
+| | Vídeo malo (taller) | Vídeo bueno (paletizado) |
+|---|---|---|
+| **Reglas mecánicas** | Quitan lo imposible (saltos: 25 → 4); no ven lo inventado | No tienen nada que quitar; no estropean nada |
+| **IA como filtro** | Quita la cuarta parte de datos inventados que las reglas no ven ✅; en 1 de 3 ejecuciones invierte los lados y borra datos buenos ❌ | Borra ocultaciones cortas bien estimadas y pasa el semáforo de verde a rojo ❌ |
+| **IA como auditor** | Explica por qué el vídeo no sirve y qué falta ✅ | Confirma la calidad y describe la tarea ✅ |
+| **IA para lo que no se mide** | Fases, riesgo por fase, carga, agarre, torsión, muñecas ✅ (con el riesgo de lados cambiados) | Fases, carga, agarre, torsión, muñecas ✅ |
+
+Conclusiones:
+
+1. **Las reglas mecánicas son la base**: gratis, instantáneas, deterministas, y en ningún caso empeoraron el resultado de forma importante.
+2. **La IA detecta un tipo de error que las reglas no pueden ver**: la articulación plausible pero inventada. Ese valor es real; en el vídeo malo, reglas e IA casi no coincidieron en lo que quitaban.
+3. **Pero como filtro automático es poco fiable en las dos direcciones**: demasiado estricta en vídeos buenos (borra lo que no ve directamente aunque esté bien estimado) y, a veces, equivocada en vídeos difíciles (inversión de lados). Y varía entre ejecuciones.
+4. **Donde más aporta es en lo que la cámara no da**: fases y su riesgo, carga, agarre, torsión, muñecas y el diagnóstico de calidad del vídeo. Eso alimenta directamente REBA y RULA.
+5. **Lo que de verdad decide la calidad es la grabación**: el mismo sistema dice «no» al vídeo del taller y «sí» al de paletizado.
+
+**Proceso recomendado** (lo que proponemos como siguiente versión):
+
+1. MediaPipe, en **2D o 3D según la orientación de la cámara**.
+2. **Reglas mecánicas siempre.**
+3. **IA revisora con política de decisión**:
+   - «Mal colocada» y ocultaciones **largas** (más de 1–1,5 s): se borran.
+   - Ocultaciones **cortas**: se conservan como *aproximadas* si las reglas las ven coherentes.
+   - **Inversión de lados**: no se borra; se intercambian los lados solo si lo confirman la profundidad 3D o varias ejecuciones.
+   - **Consenso**: en vídeos importantes, dos o tres ejecuciones y solo se aplica lo que coincide.
+4. **Semáforo de validez** antes de puntuar, y **revisión humana** de los tramos críticos (los de riesgo alto).
+5. REBA, RULA y OWAS **calculados en código**, con el contexto y las muñecas de la IA como entradas declaradas.
+
+Queda una pregunta que estas pruebas no pueden responder: **¿qué serie se acerca más a la realidad?** Para eso hace falta una referencia medida a mano por un ergónomo en vídeos reales, buenos y malos. Es el siguiente paso.
 
 ## 6 bis. Validación estadística del vídeo
 
@@ -156,10 +225,12 @@ Dos perspectivas, según el método: **peor postura** (REBA, RULA: 1, 2 y 5) y *
 6. **Reglas e IA se complementan.** Las reglas detectan lo imposible; la IA, lo plausible pero inventado. Casi no coinciden.
 7. **Una cobertura alta puede ser falsa.** El 74 % de MediaPipe era, en realidad, un 50 % respaldado por la imagen.
 8. **Antes de evaluar, validar el vídeo.** Un semáforo estadístico evita puntuar un riesgo con datos que no representan la tarea.
+9. **La IA es buen auditor y mal filtro automático.** Acierta al explicar qué falla y al aportar contexto; al borrar datos por su cuenta, se pasa de estricta en vídeos buenos y se equivoca a veces en los difíciles.
+10. **Una política de decisión vale más que otro modelo.** Qué se borra, qué se conserva como aproximado y cuándo se pide consenso o revisión humana decide el resultado tanto como la propia IA.
 
 ## 7. Límites (para decirlos en el artículo)
 
-- Un solo vídeo, de baja resolución y con el trabajador de espaldas casi todo el tiempo.
+- Dos vídeos: uno real, de baja resolución y con el trabajador de espaldas casi todo el tiempo, y otro sintético y diseñado para salir bien. Pocas ejecuciones de la IA (tres en el primero, una en el segundo).
 - Sin referencia medida a mano: las métricas de C miden **estabilidad y coherencia**, no exactitud. El siguiente paso es anotar 15–20 fotogramas con un ergónomo.
 - No es una herramienta validada de evaluación de riesgos.
 
@@ -172,6 +243,9 @@ Dos perspectivas, según el método: **peor postura** (REBA, RULA: 1, 2 y 5) y *
 - [ ] Tabla resumen de la ganancia: bruto, reglas, Argon y Reglas + Argon.
 - [ ] Captura del semáforo de validez (métodos y regiones) y de los consejos de grabación.
 - [ ] Captura del anillo ámbar (punto aproximado) y la cruz roja (punto rechazado) sobre el vídeo.
+- [ ] Fotograma del cuadro eléctrico (12–14 s) que muestra qué brazo está levantado, junto a la frase de Argon que dice lo contrario.
+- [ ] Vídeo de paletizado: semáforo en verde con las reglas y en rojo con Reglas + Argon.
+- [ ] Tabla del veredicto (apartado 6 ter): vídeo malo frente a vídeo bueno.
 
 ## 9. Privacidad y ética
 
