@@ -5,11 +5,12 @@
 //      nuestro código a partir de esos puntos, igual que en A; los puntos se dibujan sobre el vídeo.
 //      Sirve para ver qué percibe Argon: no es fiable para medir.
 //  C · Argon revisor: el modelo ve un vídeo con el original y el esqueleto de MediaPipe en bruto
-//      lado a lado, y señala por articulación y tramo dónde está mal colocado o no se ve. No da
-//      coordenadas ni ángulos: la corrección la hace nuestro código (quita esos puntos y rellena
-//      solo los huecos cortos de la serie de MediaPipe).
+//      lado a lado, y señala por articulación y tramo dónde está mal colocado, no se ve o está
+//      solo aproximado. No da coordenadas ni ángulos: la corrección la hace nuestro código (quita
+//      los puntos rechazados, conserva marcados los aproximados y rellena solo los huecos cortos).
+//  D · Reglas + Argon: la misma revisión de Argon y, después, los filtros mecánicos (js/filters.js).
 
-import { ANGLE_DEFS, computeSeries, smooth } from './angles.js';
+import { ANGLE_DEFS, computeSeries, smooth, allNeeds } from './angles.js';
 import { GEMINI } from './config.js';
 import { videoPart, interact } from './gemini.js';
 
@@ -23,7 +24,7 @@ const tramo = (extra = {}) => obj({ inicio: num, fin: num, ...extra });
 
 const CONTEXTO = obj({
   tarea: { type: 'string', description: 'Qué hace el trabajador, en una frase.' },
-  fases: arr(tramo({ descripcion: str })),
+  fases: arr(tramo({ descripcion: str, riesgo: { type: 'string', enum: ['alto', 'medio', 'bajo'] } })),
   carga: obj({ manipula: { type: 'boolean' }, descripcion: str, peso_estimado_kg: numOrNull }),
   agarre: { type: 'string', enum: ['bueno', 'regular', 'malo', 'inaceptable', 'no_aplica'] },
   torsion_tronco: arr(tramo({ grados_aprox: numOrNull })),
@@ -57,9 +58,11 @@ const SCHEMA_B = obj({
   contexto: CONTEXTO,
 });
 
+// mal_colocada y no_visible quitan el punto; aproximada lo conserva marcado como de menor precisión.
 export const VEREDICTOS = {
   mal_colocada: 'Mal colocada',
   no_visible: 'No visible',
+  aproximada: 'Aproximada',
 };
 
 const SCHEMA_C = obj({
@@ -141,6 +144,11 @@ Para cada problema, da un tramo (inicio, fin) por articulación con uno de estos
   que no es la que se ve (por ejemplo, rodillas dobladas cuando está de pie con las piernas rectas).
 - no_visible: el esqueleto dibuja una articulación que en la imagen original está tapada (por el propio
   cuerpo, una máquina o un objeto) o fuera del encuadre, de modo que su posición es una suposición.
+- aproximada: la articulación no está exactamente en su sitio (o se ve solo en parte), pero la postura que
+  dibuja el esqueleto es la que se ve: por ejemplo, el brazo está por encima del hombro y el esqueleto también
+  lo pone por encima, aunque el hombro esté algo desplazado. Úsalo cuando el dato sirva para saber la
+  categoría de la postura (REBA, RULA, OWAS) aunque no para medir los grados con precisión.
+  Prefiere aproximada a mal_colocada cuando la postura general sea correcta.
 
 Reglas:
 - Informa solo de los problemas. Lo que no menciones se da por correcto.
@@ -149,6 +157,7 @@ Reglas:
 - No calcules ángulos ni des coordenadas: solo juzga la colocación.
 - Si hay varias personas, revisa solo el esqueleto del trabajador principal.
 - En resumen, describe en dos o tres frases la calidad general del esqueleto y sus fallos típicos.
+- En las fases de la tarea, indica el riesgo ergonómico de cada una (alto, medio o bajo).
 
 Contexto que debes aportar además: la tarea, sus fases, si manipula una carga (y su peso aproximado si se
 puede estimar), el agarre, los tramos con torsión o inclinación lateral del tronco, el apoyo de las piernas
@@ -253,34 +262,44 @@ function fillGaps(v, times, maxGap) {
 }
 
 /**
- * Vista del escenario C: la serie de MediaPipe en bruto sin los puntos que rechaza Argon y con los
- * huecos cortos rellenados. `cambios` cuenta por ángulo los fotogramas descartados y rellenados;
- * `bandas` da, por grupo de gráfica, los tramos en que Argon ha rechazado algún punto.
+ * Escenarios C y D: la serie de MediaPipe sin los puntos que rechaza Argon (los «aproximados» se
+ * conservan marcados) y con los huecos de hasta 1 s rellenados. Con `reglas` (D), además se aplican
+ * los filtros mecánicos después de la revisión de Argon.
+ *  - cambios: por ángulo, valores en bruto descartados y fotogramas rellenados.
+ *  - interp / aprox: por ángulo, qué valores son interpolados o vienen de un punto aproximado.
+ *  - bandas: por grupo de gráfica, tramos [inicio, fin, 'rechazo' | 'aprox'].
  */
-export function viewC(result, frames, { mode, width, height, smoothWindow = 1 }) {
-  const rejected = rejectedPoints(result, frames);
-  const hide = (pts, bad) => pts && pts.map((p, k) => (bad.has(k) ? [p[0], p[1], p[2], 0] : p));
-  const corrected = frames.map((f, i) => (rejected[i].size
-    ? { ...f, lm: hide(f.lm, rejected[i]), wlm: hide(f.wlm, rejected[i]) } : f));
-  const opts = { mode, width, height, smoothWindow: 1, filtros: false };
+function cleanWithArgon(result, frames, { mode, width, height, smoothWindow = 1, reglas = false }) {
+  const marks = rejectedPoints(result, frames);
+  const exclude = marks.map((m) => new Set([...m].filter(([, v]) => v !== 'aproximada').map(([k]) => k)));
+  const opts = { mode, width, height, smoothWindow: 1 };
   const raw = computeSeries(frames, opts).series;
-  const fixed = computeSeries(corrected, opts);
+  const used = [];
+  const fixed = computeSeries(frames, { ...opts, filtros: reglas, exclude, used });
   const { times } = fixed;
-  const series = {}, cambios = {};
+  const series = {}, cambios = {}, interp = {}, aprox = {};
   for (const def of ANGLE_DEFS) {
     const v = fixed.series[def.id];
     const descartados = v.filter((x, i) => x == null && raw[def.id][i] != null).length;
+    const empty = v.map((x) => x == null);
     const rellenados = fillGaps(v, times, GEMINI.huecoMaximoC_s);
+    interp[def.id] = v.map((x, i) => x != null && (empty[i] || fixed.interp[def.id][i]));
+    aprox[def.id] = v.map((x, i) => x != null && !interp[def.id][i]
+      && (used[i]?.[def.id] || []).some((k) => marks[i].get(k) === 'aproximada'));
     series[def.id] = smooth(v, smoothWindow);
-    cambios[def.id] = { descartados, rellenados };
+    cambios[def.id] = { descartados, rellenados, aproximados: aprox[def.id].filter(Boolean).length };
   }
   const bandas = {};
   for (const r of result.json.revisiones || []) {
     const idx = PUNTOS[r.articulacion];
-    for (const def of ANGLE_DEFS) {
-      if (!def.needs.includes(idx)) continue;
-      (bandas[def.group] ||= []).push([r.inicio, r.fin]);
-    }
+    const groups = new Set(ANGLE_DEFS.filter((d) => allNeeds(d).includes(idx)).map((d) => d.group));
+    for (const g of groups) (bandas[g] ||= []).push([r.inicio, r.fin, r.veredicto === 'aproximada' ? 'aprox' : 'rechazo']);
   }
-  return { times, series, rejected, cambios, bandas };
+  return { times, series, rejected: marks, cambios, interp, aprox, bandas };
 }
+
+/** Escenario C: solo la revisión de Argon. */
+export const viewC = (result, frames, opts) => cleanWithArgon(result, frames, { ...opts, reglas: false });
+
+/** Escenario D: revisión de Argon y, después, los filtros mecánicos. */
+export const viewD = (result, frames, opts) => cleanWithArgon(result, frames, { ...opts, reglas: true });

@@ -30,7 +30,8 @@ const sideColor = (s) => (s === 'C' ? css('--skeleton-c') : css(`--side-${s}`));
 /**
  * Esqueletos sobre el vídeo: el de MediaPipe (`frame`) y, si se pasa, el de Argon (`argon`, con
  * el formato de MediaPipe). El de Argon va con líneas discontinuas y articulaciones cuadradas.
- * `rejected` (Map índice → veredicto) marca con una cruz roja los puntos que Argon rechaza en C.
+ * `rejected` (Map índice → veredicto) marca los puntos que revisa Argon en C y D: cruz roja si los
+ * rechaza y anillo ámbar si son aproximados.
  */
 export function drawOverlay(canvas, video, frame, { showMP = true, argon = null, rejected = null } = {}) {
   const { ctx, w, h } = fitCanvas(canvas);
@@ -65,8 +66,15 @@ function drawMediaPipe(ctx, r, frame, lw) {
 function drawRejected(ctx, r, frame, rejected, lw) {
   const s = lw * 4;
   ctx.globalAlpha = 1;
-  for (const i of rejected.keys()) {
+  for (const [i, veredicto] of rejected) {
     const x = r.x + frame.lm[i][0] * r.w, y = r.y + frame.lm[i][1] * r.h;
+    if (veredicto === 'aproximada') {
+      for (const [color, width] of [['#000', lw + 3], [css('--warn'), lw + 1]]) {
+        ctx.strokeStyle = color; ctx.lineWidth = width;
+        ctx.beginPath(); ctx.arc(x, y, s * 0.9, 0, Math.PI * 2); ctx.stroke();
+      }
+      continue;
+    }
     for (const [color, width] of [['#fff', lw * 2 + 2], [css('--danger'), lw * 2]]) {
       ctx.strokeStyle = color; ctx.lineWidth = width;
       ctx.beginPath();

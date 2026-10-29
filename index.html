@@ -133,6 +133,7 @@
           <button data-scenario="A1" title="MediaPipe con filtros de consistencia mecánica (reglas fijas)">A · Filtros mecánicos</button>
           <button data-scenario="B" disabled title="Gemini 4 Argon solo: sitúa las articulaciones y estima los ángulos">B · Argon solo</button>
           <button data-scenario="C" disabled title="MediaPipe en bruto con el filtro inteligente de Gemini 4 Argon">C · Argon revisor</button>
+          <button data-scenario="D" disabled title="Revisión de Gemini 4 Argon y, después, filtros mecánicos">D · Reglas + Argon</button>
         </div>
       </div>
       <div class="controls compact">
@@ -169,11 +170,28 @@
       </details>
 
       <div id="compare">
-        <h3 class="sub">Ganancia de la limpieza: bruto, filtros mecánicos y Argon</h3>
-        <p class="micro">Sobre las series sin suavizar, en el modo de ángulos activo. <b>Fluctuación</b>: cambio medio entre fotogramas consecutivos (°/s); menos es más estable.
+        <h3 class="sub">Ganancia de la limpieza</h3>
+        <p class="micro">Sobre las series sin suavizar, en el modo de ángulos activo. <b>Fluctuación</b>: cambio medio entre fotogramas consecutivos medidos (°/s, sin interpolados); menos es más estable.
           <b>Saltos</b>: cambios más rápidos de lo que el cuerpo puede hacer. <b>Fuera de rango</b>: posturas imposibles. <b>Cobertura</b>: fotogramas con valor.
-          <b>Fotogramas tocados</b>: valores en bruto que quita o cambia cada método. Miden estabilidad y coherencia, no exactitud.</p>
-        <div class="table-scroll"><table class="stats" id="compare-table"></table></div>
+          <b>Tramos</b>: en cuántos trozos queda la serie y cuánto dura el mediano. <b>Aproximados</b>: valores que Argon da por aproximados.
+          Miden estabilidad y coherencia, no exactitud.</p>
+        <div class="table-scroll"><table class="stats" id="compare-summary"></table></div>
+        <p class="micro" id="overlap-note"></p>
+        <details class="tips">
+          <summary>Detalle por articulación</summary>
+          <div class="table-scroll"><table class="stats" id="compare-table"></table></div>
+        </details>
+      </div>
+
+      <div id="validation">
+        <h3 class="sub">Validez del vídeo <span class="muted" id="validation-source"></span></h3>
+        <p class="micro">¿Lo que se ve es representativo de la tarea? Cinco comprobaciones por articulación: <b>cobertura</b>; <b>fases</b> (cobertura en cada fase de la tarea);
+          <b>muestra</b> (margen de error del % de tiempo en postura de riesgo, descontando que los fotogramas seguidos se parecen); <b>extremos</b> (¿cambia la conclusión si lo que no se ve estuviera todo, o nada, en postura de riesgo?);
+          y <b>pico</b> (¿puede estar oculta la peor postura?). Los umbrales son convenciones iniciales, a calibrar con un ergónomo.</p>
+        <div class="verdicts" id="validation-methods"></div>
+        <div class="table-scroll"><table class="stats" id="validation-table"></table></div>
+        <h4 class="sub">Qué falta y cómo mejorar la grabación</h4>
+        <ul class="advice" id="validation-advice"></ul>
       </div>
 
       <div class="export">
@@ -193,8 +211,8 @@
           <p>Argon ve el vídeo, marca dónde está cada articulación en cada fotograma que muestrea (se dibuja sobre el vídeo) y estima los ángulos por su cuenta, sin MediaPipe. Aporta además el contexto de la tarea.</p>
         </div>
         <div class="scenario">
-          <h3>C · Argon revisor</h3>
-          <p>Argon ve el vídeo con el original y el esqueleto de MediaPipe en bruto lado a lado, y señala por articulación y tramo dónde el esqueleto está mal colocado o la articulación no se ve. No da ángulos: nuestro código quita esos puntos y rellena solo los huecos de menos de 1 s. Aporta también el contexto.</p>
+          <h3>C · Argon revisor y D · Reglas + Argon</h3>
+          <p>Argon ve el vídeo con el original y el esqueleto de MediaPipe en bruto lado a lado, y señala por articulación y tramo dónde el esqueleto está mal colocado, la articulación no se ve o la posición es solo aproximada. No da ángulos: nuestro código quita los puntos rechazados, conserva marcados los aproximados y rellena solo los huecos de menos de 1 s. D aplica además los filtros mecánicos. Aporta también el contexto y el riesgo de cada fase.</p>
         </div>
       </div>
       <div class="controls">

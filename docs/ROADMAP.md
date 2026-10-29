@@ -11,7 +11,8 @@ El objetivo final es una **skill** que un asistente (Gemini, Claude u otro con M
 | 1 | Filtros anti-oclusión en la serie de MediaPipe | Hecho (v0.2) |
 | 2 | Escenarios A · B · C (MediaPipe, Gemini 4 Argon, mixto) | Hecho (v0.2); probado con la API real |
 | 2b | Esqueleto de Argon sobre el vídeo (puntos 2D por fotograma) | Hecho (v0.3); probado: no sirve para medir |
-| 2c | C · Argon revisor: revisa el vídeo con el esqueleto de MediaPipe y se miden las ganancias | Hecho (v0.4), pendiente de probar con la API real |
+| 2c | C · Argon revisor: revisa el vídeo con el esqueleto de MediaPipe y se miden las ganancias | Hecho (v0.4); probado con la API real |
+| 2d | D · Reglas + Argon, cálculo con el lado visible, veredicto «aproximada» y semáforo de validez | Hecho (v0.5), pendiente de probar con la API real |
 | 3 | Validación de los escenarios frente a una referencia | Pendiente |
 | 4 | Módulo `ergo`: REBA, RULA y OWAS | Pendiente |
 | 5 | Motor sin interfaz (Python) | Pendiente |
@@ -52,6 +53,13 @@ Otra observación: en el accionamiento del cuadro eléctrico (12–17 s) el braz
 En vez de pedirle a Argon que localice articulaciones, se le pide que **compruebe** el esqueleto de MediaPipe: ve un vídeo con el original y el esqueleto en bruto lado a lado (generado en el navegador) y señala por articulación y tramo dónde está mal colocado o no se ve. El código quita esos puntos y rellena solo los huecos de menos de 1 s.
 
 Se compara MediaPipe en bruto, con filtros mecánicos y con la revisión de Argon: fluctuación, saltos imposibles, valores fuera de rango, cobertura y qué fotogramas toca cada método.
+
+## 2d. Combinación y validez del vídeo (hecho)
+
+- **D · Reglas + Argon**: Argon quita lo inventado y después las reglas quitan lo imposible. Detectan errores distintos (en el vídeo de prueba casi no coinciden) y juntos consiguen la estabilidad de las reglas y la honestidad de la IA.
+- **Lado visible**: si un punto está rechazado, el ángulo se calcula con el otro lado.
+- **Aproximada**: Argon puede conservar un punto desplazado si la postura es la correcta (útil para categorías de REBA).
+- **Semáforo de validez**: cinco comprobaciones estadísticas por articulación (cobertura, fases, muestra efectiva, peor y mejor caso, pico), veredicto por método (REBA, RULA, OWAS) y por región, y consejos de grabación.
 
 ## 3. Validación (siguiente)
 

@@ -7,9 +7,10 @@ Prueba de concepto de la **Fase 1 (percepción)** de un modelo biomecánico. A p
 3. Calcula los **ángulos articulares** de tronco, cuello, hombros, codos, caderas y rodillas, en dos modos: plano de imagen (2D) o estimación 3D.
 4. Aplica **filtros anti-oclusión** que descartan reconstrucciones erróneas (por ejemplo, un brazo tapado que MediaPipe «levanta»).
 5. Muestra la **evolución temporal** de cada ángulo y un **resumen estadístico** (media, mediana, P95, mínimo, máximo y cobertura).
-6. Compara **MediaPipe en bruto**, MediaPipe con **filtros mecánicos** y MediaPipe con el **filtro inteligente** de Gemini 4 Argon (C), y muestra lo que ve Argon por sí solo (B).
-7. Genera un **vídeo con el esqueleto** de MediaPipe (lado a lado con el original, o superpuesto) para revisarlo y descargarlo.
-8. **Exporta** los ángulos (CSV), los puntos clave (CSV) y los datos completos (JSON, formato `postura/v1`) para las fases siguientes (REBA, RULA, OWAS, NIOSH, OpenSim…).
+6. Compara **MediaPipe en bruto**, con **filtros mecánicos**, con el **filtro inteligente** de Gemini 4 Argon (C) y con **ambos combinados** (D), y muestra lo que ve Argon por sí solo (B).
+7. **Valida el vídeo** con un semáforo estadístico por método (REBA, RULA, OWAS) y por región del cuerpo, y dice cómo mejorar la grabación.
+8. Genera un **vídeo con el esqueleto** de MediaPipe (lado a lado con el original, o superpuesto) para revisarlo y descargarlo.
+9. **Exporta** los ángulos (CSV), los puntos clave (CSV) y los datos completos (JSON, formato `postura/v1`) para las fases siguientes (REBA, RULA, OWAS, NIOSH, OpenSim…).
 
 **El escenario A se procesa entero en el navegador.** En B y C, el vídeo se envía a la API de Google Gemini.
 
@@ -22,7 +23,10 @@ Prueba de concepto de la **Fase 1 (percepción)** de un modelo biomecánico. A p
 | **A · Bruto** | Serie densa de ángulos (10–30 por segundo) tal como sale de MediaPipe | Navegador |
 | **A · Filtros mecánicos** | La misma serie limpiada con reglas fijas de consistencia mecánica | Navegador |
 | **B · Argon solo** | Gemini 4 Argon marca las articulaciones en cada fotograma que muestrea, estima los ángulos 3D y describe el contexto de la tarea | API de Gemini |
-| **C · Argon revisor** | Argon revisa el vídeo con el esqueleto de MediaPipe en bruto y señala dónde está mal colocado o no se ve; el código quita esos puntos y rellena los huecos cortos | Navegador + API de Gemini |
+| **C · Argon revisor** | Argon revisa el vídeo con el esqueleto de MediaPipe en bruto y señala dónde está mal colocado, no se ve o es aproximado; el código quita los puntos rechazados y rellena los huecos cortos | Navegador + API de Gemini |
+| **D · Reglas + Argon** | La revisión de Argon y, después, los filtros mecánicos. Sale de la misma llamada que C | Navegador + API de Gemini |
+
+Si un punto está rechazado o no se ve, los ángulos que lo usan se calculan con el **lado visible** (tronco y elevación del brazo con el hombro y la cadera del mismo lado, cuello con una sola oreja, cadera con el hombro del otro lado).
 
 ### Esqueleto de Argon
 
@@ -40,9 +44,9 @@ En las gráficas, la línea tenue es siempre MediaPipe en bruto. La tabla *Ganan
    - **Lado a lado**: original a la izquierda; esqueleto y tiempo a la derecha. Es el que revisa Argon.
    - **Superpuesto**: una sola vista con el esqueleto, para grabar o publicar.
    Los dos se pueden descargar debajo del vídeo.
-2. Al pulsar *Ejecutar C*, el vídeo lado a lado se envía a Gemini 4 Argon. Devuelve, por articulación y tramo, si el esqueleto está **mal colocado** o la articulación **no se ve**, con el motivo. No da coordenadas ni ángulos.
-3. El código quita esos puntos (cada tramo se amplía medio intervalo de muestreo), recalcula los ángulos, rellena los huecos de menos de 1 s y deja vacíos los más largos.
-4. En el vídeo, los puntos rechazados llevan una **cruz roja**; en las gráficas, los tramos corregidos van **sombreados**.
+2. Al pulsar *Ejecutar C*, el vídeo lado a lado se envía a Gemini 4 Argon. Devuelve, por articulación y tramo, si el esqueleto está **mal colocado**, la articulación **no se ve** o la posición es **aproximada** (desplazada, pero con la postura correcta), con el motivo, y el riesgo de cada fase de la tarea. No da coordenadas ni ángulos.
+3. El código quita los puntos mal colocados o no visibles (cada tramo se amplía medio intervalo de muestreo), conserva marcados los aproximados, recalcula los ángulos, rellena los huecos de menos de 1 s y deja vacíos los más largos. D aplica después los filtros mecánicos.
+4. En el vídeo, los puntos rechazados llevan una **cruz roja** y los aproximados un **anillo ámbar**; en las gráficas, los tramos revisados van **sombreados** en rojo o ámbar.
 
 ### Ganancia de la limpieza
 
@@ -50,13 +54,29 @@ Sobre las series sin suavizar, en el modo de ángulos activo:
 
 | Métrica | Qué mide |
 |---|---|
-| Fluctuación (°/s) | Cambio medio entre fotogramas consecutivos: estabilidad |
+| Fluctuación (°/s) | Cambio medio entre fotogramas consecutivos medidos (sin interpolados), ponderado por el número de medidas: estabilidad |
 | Saltos imposibles | Cambios más rápidos que la velocidad máxima de la articulación |
 | Fuera de rango | Valores fuera del rango fisiológico |
 | Cobertura | Fotogramas con valor |
-| Fotogramas tocados | Valores en bruto que quitan o cambian solo las reglas, solo Argon o ambos |
+| Tramos / tramo mediano | Fragmentación: en cuántos trozos queda la serie |
+| Aproximados | Valores que Argon da por aproximados |
+| Qué detecta cada uno | Valores en bruto que quitan o cambian solo las reglas, solo Argon o ambos |
 
 Miden estabilidad y coherencia, **no exactitud**: para eso hace falta una referencia medida a mano.
+
+### Validez del vídeo
+
+Un semáforo dice si lo que se ve es **representativo** de la tarea, sobre la mejor limpieza disponible (D si se ha ejecutado C; si no, las reglas). Cinco comprobaciones por articulación:
+
+| # | Comprobación | Pregunta |
+|---|---|---|
+| 1 | Cobertura | ¿Cuánto se ve de verdad? |
+| 2 | Cobertura por fase (las de Argon, o 5 tramos iguales) | ¿Falta alguna fase? Perder una fase de riesgo alto es rojo |
+| 3 | Muestra efectiva (tiempo de decorrelación) y margen de error | ¿Hay observaciones independientes suficientes para el % de tiempo en postura de riesgo? (muestreo del trabajo) |
+| 4 | Peor y mejor caso | ¿Cambia la conclusión si lo que no se ve estuviera todo, o nada, en postura de riesgo? |
+| 5 | Pico | ¿Puede estar oculta la peor postura en un hueco largo? |
+
+El veredicto se da por **método**: REBA y RULA (peor postura: 1, 2 y 5) y OWAS (% del tiempo: 1 a 4), y por **región** (tronco y cuello, piernas, brazo izquierdo, brazo derecho), con consejos de grabación. Las categorías de postura siguen los umbrales de REBA. Todos los umbrales están en `js/config.js` (`VALIDACION`) y son convenciones iniciales a calibrar con un ergónomo.
 
 ### Clave de la API de Gemini
 
@@ -132,7 +152,8 @@ js/filters.js         Filtros anti-oclusión
 js/gemini.js          Cliente de la API de Gemini (clave solo en memoria)
 js/argon.js           Escenarios B y C: instrucciones, esquemas de salida y combinación con A
 js/overlay-video.js   Vídeos MP4 con el esqueleto de MediaPipe (lado a lado y superpuesto)
-js/metrics.js         Métricas de estabilidad y coherencia para comparar bruto, filtros y Argon
+js/metrics.js         Métricas de estabilidad y coherencia para comparar bruto, reglas, Argon y combinado
+js/validation.js      Validación estadística del vídeo (semáforo por método y por región)
 js/charts.js          Gráficas temporales (canvas, sin dependencias)
 js/render.js          Esqueleto sobre el vídeo y visor 3D
 js/export.js          Exportación CSV y JSON
