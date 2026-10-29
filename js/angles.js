@@ -110,7 +110,7 @@ export function anglesForFrame(frame, mode, width, height) {
 }
 
 /** Media móvil centrada que respeta los huecos (null). */
-function smooth(series, window) {
+export function smooth(series, window) {
   if (window <= 1) return series.slice();
   const h = Math.floor(window / 2);
   return series.map((v, i) => {

@@ -5,7 +5,10 @@ import { ANGLE_DEFS } from './angles.js';
 import { LANDMARK_NAMES } from './pose.js';
 
 function download(name, content, type) {
-  const blob = new Blob([content], { type });
+  downloadBlob(name, new Blob([content], { type }));
+}
+
+export function downloadBlob(name, blob) {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = name;
@@ -14,7 +17,7 @@ function download(name, content, type) {
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
 }
 
-const baseName = (meta) => (meta.fileName || 'video').replace(/\.[^.]+$/, '').replace(/[^\w-]+/g, '_');
+export const baseName = (meta) => (meta.fileName || 'video').replace(/\.[^.]+$/, '').replace(/[^\w-]+/g, '_');
 
 export function exportAnglesCSV(meta, times, series, mode) {
   const head = ['frame', 'tiempo_s', ...ANGLE_DEFS.map((d) => `${d.id}_deg`)];

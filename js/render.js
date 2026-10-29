@@ -30,14 +30,16 @@ const sideColor = (s) => (s === 'C' ? css('--skeleton-c') : css(`--side-${s}`));
 /**
  * Esqueletos sobre el vídeo: el de MediaPipe (`frame`) y, si se pasa, el de Argon (`argon`, con
  * el formato de MediaPipe). El de Argon va con líneas discontinuas y articulaciones cuadradas.
+ * `rejected` (Map índice → veredicto) marca con una cruz roja los puntos que Argon rechaza en C.
  */
-export function drawOverlay(canvas, video, frame, { showMP = true, argon = null } = {}) {
+export function drawOverlay(canvas, video, frame, { showMP = true, argon = null, rejected = null } = {}) {
   const { ctx, w, h } = fitCanvas(canvas);
   const r = contentRect(video, w, h);
   const lw = Math.max(2, Math.min(4, r.w / 250));
   ctx.lineCap = 'round';
   if (showMP && frame?.lm) drawMediaPipe(ctx, r, frame, lw);
   if (argon) drawArgon(ctx, r, argon, lw);
+  if (rejected?.size && frame?.lm) drawRejected(ctx, r, frame, rejected, lw);
   ctx.globalAlpha = 1;
   ctx.setLineDash([]);
 }
@@ -57,6 +59,21 @@ function drawMediaPipe(ctx, r, frame, lw) {
     ctx.beginPath(); ctx.arc(P[i][0], P[i][1], lw * 1.3, 0, Math.PI * 2);
     ctx.fillStyle = '#ffffff'; ctx.fill();
     ctx.lineWidth = 1.5; ctx.strokeStyle = '#111'; ctx.stroke();
+  }
+}
+
+function drawRejected(ctx, r, frame, rejected, lw) {
+  const s = lw * 4;
+  ctx.globalAlpha = 1;
+  for (const i of rejected.keys()) {
+    const x = r.x + frame.lm[i][0] * r.w, y = r.y + frame.lm[i][1] * r.h;
+    for (const [color, width] of [['#fff', lw * 2 + 2], [css('--danger'), lw * 2]]) {
+      ctx.strokeStyle = color; ctx.lineWidth = width;
+      ctx.beginPath();
+      ctx.moveTo(x - s, y - s); ctx.lineTo(x + s, y + s);
+      ctx.moveTo(x + s, y - s); ctx.lineTo(x - s, y + s);
+      ctx.stroke();
+    }
   }
 }
 

@@ -43,7 +43,7 @@ export async function getLandmarker(model = 'full') {
   return { landmarker, delegate: delegateUsed };
 }
 
-function seek(video, t) {
+export function seek(video, t) {
   return new Promise((resolve) => {
     const done = () => {
       video.removeEventListener('seeked', done);

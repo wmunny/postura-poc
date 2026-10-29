@@ -35,11 +35,15 @@ export class AngleChart {
     new ResizeObserver(() => this.draw()).observe(this.el);
   }
 
-  /** `ghost`: serie de referencia que se dibuja tenue debajo (sin filtrar, o el escenario A). */
-  setData(times, data, ghost = null) {
+  /**
+   * `ghost`: serie de referencia que se dibuja tenue debajo (la serie en bruto).
+   * `bands`: tramos [inicio, fin] que se sombrean (los que ha corregido Argon en el escenario C).
+   */
+  setData(times, data, ghost = null, bands = null) {
     this.times = times;
     this.data = data;
     this.ghost = ghost;
+    this.bands = bands;
     const vals = this.series.flatMap((s) => [...(data[s.id] || []), ...(ghost?.[s.id] || [])]).filter((v) => v != null);
     const max = vals.length ? Math.max(...vals) : 90;
     this.yMax = Math.max(60, Math.ceil(max / 30) * 30);
@@ -115,6 +119,15 @@ export class AngleChart {
       for (let t = 0; t <= span + 1e-6; t += stepT) {
         ctx.fillStyle = muted;
         ctx.fillText(`${t}s`, this.tToX(t), h - this.pad.b + 5);
+      }
+    }
+
+    // Tramos corregidos
+    if (this.bands?.length) {
+      ctx.fillStyle = css('--band');
+      for (const [a, b] of this.bands) {
+        const x0 = this.tToX(Math.max(0, a)), x1 = this.tToX(Math.min(this.tMax, b));
+        ctx.fillRect(x0, this.pad.t, Math.max(2, x1 - x0), h - this.pad.t - this.pad.b);
       }
     }
 

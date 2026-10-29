@@ -2,10 +2,11 @@
 // Para no depender de CDNs externos (redes corporativas, uso offline), ejecuta
 // `scripts/descargar-dependencias.sh` y pon USE_LOCAL_ASSETS = true.
 
-export const APP_VERSION = '0.3.0';
+export const APP_VERSION = '0.4.0';
 
 const USE_LOCAL_ASSETS = false;
 const TASKS_VISION_VERSION = '1.1.1';
+const MP4_MUXER_VERSION = '5.2.1';
 
 const CDN = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${TASKS_VISION_VERSION}`;
 const GCS = 'https://storage.googleapis.com/mediapipe-models/pose_landmarker';
@@ -19,6 +20,7 @@ export const CONFIG = USE_LOCAL_ASSETS
         full: new URL('../vendor/models/pose_landmarker_full.task', import.meta.url).href,
         heavy: new URL('../vendor/models/pose_landmarker_heavy.task', import.meta.url).href,
       },
+      mp4MuxerUrl: new URL('../vendor/mp4-muxer/mp4-muxer.mjs', import.meta.url).href,
       tasksVisionVersion: TASKS_VISION_VERSION,
     }
   : {
@@ -29,6 +31,7 @@ export const CONFIG = USE_LOCAL_ASSETS
         full: `${GCS}/pose_landmarker_full/float16/1/pose_landmarker_full.task`,
         heavy: `${GCS}/pose_landmarker_heavy/float16/1/pose_landmarker_heavy.task`,
       },
+      mp4MuxerUrl: `https://cdn.jsdelivr.net/npm/mp4-muxer@${MP4_MUXER_VERSION}/build/mp4-muxer.mjs`,
       tasksVisionVersion: TASKS_VISION_VERSION,
     };
 
@@ -54,4 +57,13 @@ export const FILTROS = {
 export const GEMINI = {
   modelo: 'gemini-4-argon',
   maxTokensSalida: 32768,
+  huecoMaximoC_s: 1.0,       // escenario C: huecos más cortos que esto se rellenan por interpolación
+};
+
+// Vídeo con el esqueleto de MediaPipe que revisa Argon en el escenario C (js/overlay-video.js).
+export const VIDEO_ESQUELETO = {
+  anchoMaximo: 640,          // ancho máximo de cada mitad del vídeo lado a lado
+  altoMaximo: 720,
+  anchoMaximoSuperpuesto: 1280,
+  bitsPorPixel: 0.12,        // calidad: bits por píxel y fotograma
 };

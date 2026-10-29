@@ -3,12 +3,13 @@
 //  B · Argon solo: el modelo ve el vídeo, marca las articulaciones en cada fotograma que muestrea
 //      (puntos 2D) y estima los ángulos 3D, más el contexto. Los ángulos 2D de B los calcula
 //      nuestro código a partir de esos puntos, igual que en A; los puntos se dibujan sobre el vídeo.
-//  C · Mixto: el modelo ve el vídeo y la serie densa de MediaPipe (escenario A). No la recalcula:
-//      marca los tramos implausibles o dudosos, propone valores corregidos y aporta contexto.
-//
-// En ambos casos el resultado se remuestrea sobre los mismos instantes que la serie de A.
+//      Sirve para ver qué percibe Argon: no es fiable para medir.
+//  C · Argon revisor: el modelo ve un vídeo con el original y el esqueleto de MediaPipe en bruto
+//      lado a lado, y señala por articulación y tramo dónde está mal colocado o no se ve. No da
+//      coordenadas ni ángulos: la corrección la hace nuestro código (quita esos puntos y rellena
+//      solo los huecos cortos de la serie de MediaPipe).
 
-import { ANGLE_DEFS, computeSeries } from './angles.js';
+import { ANGLE_DEFS, computeSeries, smooth } from './angles.js';
 import { GEMINI } from './config.js';
 import { videoPart, interact } from './gemini.js';
 
@@ -56,17 +57,20 @@ const SCHEMA_B = obj({
   contexto: CONTEXTO,
 });
 
+export const VEREDICTOS = {
+  mal_colocada: 'Mal colocada',
+  no_visible: 'No visible',
+};
+
 const SCHEMA_C = obj({
   resumen: str,
   revisiones: arr(obj({
-    articulacion: { type: 'string', enum: IDS },
+    articulacion: { type: 'string', enum: Object.keys(PUNTOS) },
     inicio: num,
     fin: num,
-    veredicto: { type: 'string', enum: ['implausible', 'dudoso'] },
+    veredicto: { type: 'string', enum: Object.keys(VEREDICTOS) },
     motivo: str,
-    valores: arr(obj({ t: num, v: numOrNull })),
   })),
-  oclusiones: OCLUSIONES,
   contexto: CONTEXTO,
 });
 
@@ -109,48 +113,52 @@ ${REGLAS}
   return { json, usage, segundos: (performance.now() - t0) / 1000, fps, thinking };
 }
 
-/** Escenario C: Argon revisa la serie de MediaPipe con el vídeo delante. */
-export async function runC({ file, duration, fps, thinking, base, mode, signal, onStatus }) {
+/**
+ * Escenario C: Argon revisa el vídeo con el esqueleto de MediaPipe lado a lado (`file`, generado
+ * por overlay-video.js) y devuelve los tramos en que alguna articulación está mal colocada o no se ve.
+ */
+export async function runC({ file, duration, fps, thinking, signal, onStatus }) {
   const video = await videoPart(file, { fps, signal, onStatus });
-  onStatus?.('Gemini 4 Argon está revisando la serie de MediaPipe…');
-  // Serie de A reducida a ~5 muestras por segundo para que quepa holgada en el contexto.
-  const { times, series } = base;
-  const dt = times.length > 1 ? times[1] - times[0] : 1 / 15;
-  const step = Math.max(1, Math.round(0.2 / dt));
-  const rows = [];
-  for (let i = 0; i < times.length; i += step) {
-    rows.push([times[i].toFixed(2), ...IDS.map((id) => (series[id][i] == null ? '' : Math.round(series[id][i])))].join(','));
-  }
-  const modo = mode === '3d'
-    ? 'ángulos 3D estimados por MediaPipe (coordenadas world)'
-    : 'ángulos 2D en el plano de la imagen (proyección, como mediría un técnico sobre el vídeo)';
-  const prompt = `Eres especialista en biomecánica y ergonomía laboral. Te paso un vídeo de ${duration.toFixed(1)} s y la serie
-de ángulos que ha calculado MediaPipe Pose (visión artificial con una sola cámara), ya filtrada contra valores atípicos.
-Son ${modo}. Una celda vacía significa que MediaPipe no dio un valor fiable.
+  onStatus?.('Gemini 4 Argon está revisando el esqueleto de MediaPipe…');
+  const prompt = `Eres especialista en biomecánica y ergonomía laboral, y revisas la calidad de un sistema de visión artificial.
 
-Tu tarea es REVISAR la serie, no recalcularla entera:
-1. Compara la serie con lo que ves en el vídeo y detecta los tramos en que algún ángulo es implausible
-   (extremidad tapada que MediaPipe se inventa, confusión entre izquierda y derecha, postura imposible, salto
-   sin movimiento real) o dudoso.
-2. Para cada tramo implausible, da valores corregidos cada 0,5 s en la misma convención (${mode.toUpperCase()}),
-   o null si tú tampoco puedes estimarlos. En los dudosos, da valores solo si estás razonablemente seguro.
-3. Incluye solo los tramos con problemas. Si la serie es correcta, devuelve "revisiones" vacía.
-4. Señala también los tramos en que hay oclusiones.
+El vídeo (${duration.toFixed(1)} s) muestra cada instante dos veces, lado a lado:
+- IZQUIERDA: el fotograma original, sin nada encima.
+- DERECHA: el mismo fotograma con el esqueleto que ha estimado MediaPipe Pose, y el tiempo en segundos
+  impreso arriba a la izquierda. Usa ese tiempo para inicio y fin.
+- Colores del esqueleto: AZUL = lado izquierdo del trabajador; NARANJA = lado derecho del trabajador;
+  blanco = tronco (línea entre hombros y entre caderas). Los círculos blancos son las articulaciones.
+  Solo se dibujan las articulaciones que MediaPipe considera visibles.
+- Izquierda y derecha son las del trabajador, no las de la cámara (si está de espaldas, su izquierda está
+  a la izquierda de la imagen).
 
-Ángulos:
-${DEFINICIONES}
+Tu tarea: comparar las dos mitades y decir dónde el esqueleto NO corresponde al cuerpo real. Revisa estas
+articulaciones: ${Object.keys(PUNTOS).join(', ')}.
 
-${REGLAS}
+Para cada problema, da un tramo (inicio, fin) por articulación con uno de estos veredictos:
+- mal_colocada: el esqueleto pone la articulación claramente fuera de su sitio real (más de media longitud
+  del segmento contiguo), la confunde con la del otro lado, la coloca sobre un objeto o dibuja una postura
+  que no es la que se ve (por ejemplo, rodillas dobladas cuando está de pie con las piernas rectas).
+- no_visible: el esqueleto dibuja una articulación que en la imagen original está tapada (por el propio
+  cuerpo, una máquina o un objeto) o fuera del encuadre, de modo que su posición es una suposición.
 
-Serie de MediaPipe (CSV):
-t,${IDS.join(',')}
-${rows.join('\n')}`;
+Reglas:
+- Informa solo de los problemas. Lo que no menciones se da por correcto.
+- Sé exigente pero no exagerado: desviaciones de unos pocos píxeles no son un problema.
+- Agrupa los fotogramas consecutivos con el mismo problema en un solo tramo.
+- No calcules ángulos ni des coordenadas: solo juzga la colocación.
+- Si hay varias personas, revisa solo el esqueleto del trabajador principal.
+- En resumen, describe en dos o tres frases la calidad general del esqueleto y sus fallos típicos.
+
+Contexto que debes aportar además: la tarea, sus fases, si manipula una carga (y su peso aproximado si se
+puede estimar), el agarre, los tramos con torsión o inclinación lateral del tronco, el apoyo de las piernas
+y cualquier observación útil para una evaluación ergonómica (REBA, RULA, OWAS).`;
   const t0 = performance.now();
   const { json, usage } = await interact({
     model: GEMINI.modelo, input: [{ type: 'text', text: prompt }, video],
     schema: SCHEMA_C, thinking, maxTokens: GEMINI.maxTokensSalida, signal,
   });
-  return { json, usage, segundos: (performance.now() - t0) / 1000, fps, thinking, mode };
+  return { json, usage, segundos: (performance.now() - t0) / 1000, fps, thinking };
 }
 
 /** Interpola puntos {t, v} (dispersos) sobre `times`; null si el hueco supera `maxGap`. */
@@ -210,22 +218,69 @@ export function viewB(result, times, { mode, width, height }) {
   return { times, series };
 }
 
-/** Vista del escenario C: la serie de A con las correcciones de Argon aplicadas. */
-export function viewC(result, base) {
-  const { times } = base;
-  const series = Object.fromEntries(IDS.map((id) => [id, base.series[id].slice()]));
-  const cambios = Object.fromEntries(IDS.map((id) => [id, { corregidos: 0, descartados: 0, dudosos: 0 }]));
-  for (const r of result.json.revisiones) {
-    if (!series[r.articulacion]) continue;
-    const s = series[r.articulacion], c = cambios[r.articulacion];
-    const fixed = r.valores?.length ? resample(r.valores, times, 1.5) : null;
-    times.forEach((t, i) => {
-      if (t < r.inicio || t > r.fin) return;
-      if (r.veredicto === 'dudoso' && !fixed) { if (s[i] != null) c.dudosos++; return; }
-      const v = fixed ? fixed[i] : null;
-      if (v == null) { if (s[i] != null) c.descartados++; } else c.corregidos++;
-      s[i] = v;
-    });
+/**
+ * Puntos rechazados por Argon en cada fotograma: Map índice MediaPipe → veredicto.
+ * Cada tramo se amplía medio intervalo de muestreo por cada lado (Argon solo ve `fps` fotogramas por segundo).
+ */
+export function rejectedPoints(result, frames) {
+  const h = 0.5 / result.fps;
+  const out = frames.map(() => new Map());
+  for (const r of result.json.revisiones || []) {
+    const idx = PUNTOS[r.articulacion];
+    if (idx == null || !Number.isFinite(r.inicio) || !Number.isFinite(r.fin)) continue;
+    frames.forEach((f, i) => { if (f.t >= r.inicio - h && f.t <= r.fin + h) out[i].set(idx, r.veredicto); });
   }
-  return { times, series, cambios };
+  return out;
+}
+
+/** Rellena por interpolación lineal los huecos de hasta `maxGap` segundos. Devuelve cuántos ha rellenado. */
+function fillGaps(v, times, maxGap) {
+  let filled = 0;
+  for (let i = 1; i < v.length; i++) {
+    if (v[i] != null || v[i - 1] == null) continue;
+    let e = i;
+    while (e < v.length && v[e] == null) e++;
+    const a = i - 1;
+    if (e < v.length && times[e] - times[a] <= maxGap + 1e-6) {
+      for (let k = i; k < e; k++) {
+        v[k] = Math.round((v[a] + ((v[e] - v[a]) * (times[k] - times[a])) / (times[e] - times[a])) * 10) / 10;
+        filled++;
+      }
+    }
+    i = e;
+  }
+  return filled;
+}
+
+/**
+ * Vista del escenario C: la serie de MediaPipe en bruto sin los puntos que rechaza Argon y con los
+ * huecos cortos rellenados. `cambios` cuenta por ángulo los fotogramas descartados y rellenados;
+ * `bandas` da, por grupo de gráfica, los tramos en que Argon ha rechazado algún punto.
+ */
+export function viewC(result, frames, { mode, width, height, smoothWindow = 1 }) {
+  const rejected = rejectedPoints(result, frames);
+  const hide = (pts, bad) => pts && pts.map((p, k) => (bad.has(k) ? [p[0], p[1], p[2], 0] : p));
+  const corrected = frames.map((f, i) => (rejected[i].size
+    ? { ...f, lm: hide(f.lm, rejected[i]), wlm: hide(f.wlm, rejected[i]) } : f));
+  const opts = { mode, width, height, smoothWindow: 1, filtros: false };
+  const raw = computeSeries(frames, opts).series;
+  const fixed = computeSeries(corrected, opts);
+  const { times } = fixed;
+  const series = {}, cambios = {};
+  for (const def of ANGLE_DEFS) {
+    const v = fixed.series[def.id];
+    const descartados = v.filter((x, i) => x == null && raw[def.id][i] != null).length;
+    const rellenados = fillGaps(v, times, GEMINI.huecoMaximoC_s);
+    series[def.id] = smooth(v, smoothWindow);
+    cambios[def.id] = { descartados, rellenados };
+  }
+  const bandas = {};
+  for (const r of result.json.revisiones || []) {
+    const idx = PUNTOS[r.articulacion];
+    for (const def of ANGLE_DEFS) {
+      if (!def.needs.includes(idx)) continue;
+      (bandas[def.group] ||= []).push([r.inicio, r.fin]);
+    }
+  }
+  return { times, series, rejected, cambios, bandas };
 }

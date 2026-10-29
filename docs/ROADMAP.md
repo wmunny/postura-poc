@@ -10,7 +10,8 @@ El objetivo final es una **skill** que un asistente (Gemini, Claude u otro con M
 |---|---|---|
 | 1 | Filtros anti-oclusión en la serie de MediaPipe | Hecho (v0.2) |
 | 2 | Escenarios A · B · C (MediaPipe, Gemini 4 Argon, mixto) | Hecho (v0.2); probado con la API real |
-| 2b | Esqueleto de Argon sobre el vídeo (puntos 2D por fotograma) | Hecho (v0.3), pendiente de probar con la API real |
+| 2b | Esqueleto de Argon sobre el vídeo (puntos 2D por fotograma) | Hecho (v0.3); probado: no sirve para medir |
+| 2c | C · Argon revisor: revisa el vídeo con el esqueleto de MediaPipe y se miden las ganancias | Hecho (v0.4), pendiente de probar con la API real |
 | 3 | Validación de los escenarios frente a una referencia | Pendiente |
 | 4 | Módulo `ergo`: REBA, RULA y OWAS | Pendiente |
 | 5 | Motor sin interfaz (Python) | Pendiente |
@@ -42,7 +43,15 @@ La clave de la API se pide al arrancar y solo vive en la memoria de la pestaña.
 
 Argon no reconstruye el movimiento: ve unos pocos fotogramas por segundo y responde con números. Para comprobar qué percibe, en B se le piden los puntos 2D de 14 articulaciones en cada fotograma, que se dibujan sobre el vídeo junto al esqueleto de MediaPipe. En 2D, los ángulos de B se calculan a partir de esos puntos con el mismo código que A.
 
-Primera observación con el vídeo de prueba: en el accionamiento del cuadro eléctrico (12–17 s) el brazo izquierdo está de verdad por encima de la cabeza, y los ~155° de MediaPipe son en buena parte reales. Hay que revisar si los filtros descartan ahí datos válidos.
+Resultado con el vídeo de prueba: Argon sabe dónde está la persona y qué fase hace, pero sus puntos tienen un error mediano de 35 px, su esqueleto es un 37 % más grande que el real y repite posturas simétricas. No sirve para medir (ver `docs/articulo/hallazgos.md`).
+
+Otra observación: en el accionamiento del cuadro eléctrico (12–17 s) el brazo izquierdo está de verdad por encima de la cabeza, y los ~155° de MediaPipe son en buena parte reales. Hay que revisar si los filtros descartan ahí datos válidos.
+
+## 2c. C · Argon revisor (hecho)
+
+En vez de pedirle a Argon que localice articulaciones, se le pide que **compruebe** el esqueleto de MediaPipe: ve un vídeo con el original y el esqueleto en bruto lado a lado (generado en el navegador) y señala por articulación y tramo dónde está mal colocado o no se ve. El código quita esos puntos y rellena solo los huecos de menos de 1 s.
+
+Se compara MediaPipe en bruto, con filtros mecánicos y con la revisión de Argon: fluctuación, saltos imposibles, valores fuera de rango, cobertura y qué fotogramas toca cada método.
 
 ## 3. Validación (siguiente)
 

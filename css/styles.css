@@ -15,6 +15,8 @@
   --side-C: #6250d6;   /* segmentos centrales (tronco, cuello) */
   --skeleton-c: #d9d8d2;
   --argon: #f2c94c;     /* esqueleto de Argon */
+  --danger: #d93a3a;    /* puntos rechazados por Argon */
+  --band: rgba(217, 58, 58, 0.12); /* tramos corregidos en las gráficas */
   --warn-bg: #fff4dc;
   --warn-ink: #6b4a00;
   --radius: 12px;
@@ -229,3 +231,10 @@ dialog p { margin: 0 0 8px; }
 .overlay-opts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; margin: 8px 0 0; }
 .overlay-opts .micro { margin: 0; }
 .dash { display: inline-block; width: 22px; height: 0; border-top: 3px dashed var(--argon); vertical-align: middle; margin-right: 6px; }
+.video-dl { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 4px; }
+.video-dl .btn { padding: 6px 12px; font-size: 0.85rem; }
+.xmark { color: var(--danger); font-weight: 700; margin-right: 4px; }
+.band-key { display: inline-block; width: 18px; height: 10px; background: var(--band); border: 1px solid var(--danger); vertical-align: middle; margin-right: 6px; }
+.stats td.best { font-weight: 700; }
+.stats tr.total td { border-top: 2px solid var(--border); font-weight: 600; }
+.stats th.grp { text-align: center; border-bottom: 1px solid var(--border); }

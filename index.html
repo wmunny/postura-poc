@@ -121,14 +121,19 @@
         <label class="check" title="Ejecuta el escenario B para verlo"><input type="checkbox" id="show-argon" disabled> <span class="dash"></span>Esqueleto de Argon</label>
         <p class="micro" id="argon-skel-note">Ejecuta el escenario B para ver dónde sitúa Argon cada articulación.</p>
       </div>
+      <div class="video-dl">
+        <button class="btn" id="dl-side" type="button" disabled title="Original y esqueleto de MediaPipe en bruto, lado a lado: lo que revisa Argon en el escenario C">Vídeo para Argon (lado a lado)</button>
+        <button class="btn" id="dl-over" type="button" disabled title="Vídeo con el esqueleto de MediaPipe en bruto encima">Vídeo con esqueleto superpuesto</button>
+        <p class="micro" id="video-status" aria-live="polite"></p>
+      </div>
 
       <div class="controls compact">
         <div class="seg" role="group" aria-label="Escenario">
-          <button data-scenario="A" class="on" title="MediaPipe en el navegador, con o sin filtros">A · MediaPipe</button>
-          <button data-scenario="B" disabled title="Gemini 4 Argon estima los ángulos a partir del vídeo">B · Argon</button>
-          <button data-scenario="C" disabled title="Serie de MediaPipe revisada y corregida por Gemini 4 Argon">C · Mixto</button>
+          <button data-scenario="A0" class="on" title="MediaPipe tal como sale, sin limpiar">A · Bruto</button>
+          <button data-scenario="A1" title="MediaPipe con filtros de consistencia mecánica (reglas fijas)">A · Filtros mecánicos</button>
+          <button data-scenario="B" disabled title="Gemini 4 Argon solo: sitúa las articulaciones y estima los ángulos">B · Argon solo</button>
+          <button data-scenario="C" disabled title="MediaPipe en bruto con el filtro inteligente de Gemini 4 Argon">C · Argon revisor</button>
         </div>
-        <label class="check"><input type="checkbox" id="filters" checked> Filtros anti-oclusión</label>
       </div>
       <div class="controls compact">
         <div class="seg" role="group" aria-label="Modo de cálculo">
@@ -158,14 +163,16 @@
       </div>
 
       <details class="tips" id="filters-details">
-        <summary>Qué han descartado los filtros (escenario A)</summary>
+        <summary>Qué han descartado los filtros mecánicos</summary>
         <p class="micro">Fotogramas por articulación. «Interpolados» son huecos de menos de 0,3 s rellenados; el resto se deja vacío.</p>
         <div class="table-scroll"><table class="stats" id="filters-table"></table></div>
       </details>
 
-      <div id="compare" hidden>
-        <h3 class="sub">Comparativa de escenarios</h3>
-        <p class="micro">Diferencia media: media de |B − A| y |C − A| en los instantes en que ambos tienen valor.</p>
+      <div id="compare">
+        <h3 class="sub">Ganancia de la limpieza: bruto, filtros mecánicos y Argon</h3>
+        <p class="micro">Sobre las series sin suavizar, en el modo de ángulos activo. <b>Fluctuación</b>: cambio medio entre fotogramas consecutivos (°/s); menos es más estable.
+          <b>Saltos</b>: cambios más rápidos de lo que el cuerpo puede hacer. <b>Fuera de rango</b>: posturas imposibles. <b>Cobertura</b>: fotogramas con valor.
+          <b>Fotogramas tocados</b>: valores en bruto que quita o cambia cada método. Miden estabilidad y coherencia, no exactitud.</p>
         <div class="table-scroll"><table class="stats" id="compare-table"></table></div>
       </div>
 
@@ -186,8 +193,8 @@
           <p>Argon ve el vídeo, marca dónde está cada articulación en cada fotograma que muestrea (se dibuja sobre el vídeo) y estima los ángulos por su cuenta, sin MediaPipe. Aporta además el contexto de la tarea.</p>
         </div>
         <div class="scenario">
-          <h3>C · Mixto</h3>
-          <p>Argon ve el vídeo y la serie densa de MediaPipe (A). Marca los tramos implausibles, como un brazo tapado que MediaPipe levanta, propone valores corregidos y aporta el contexto.</p>
+          <h3>C · Argon revisor</h3>
+          <p>Argon ve el vídeo con el original y el esqueleto de MediaPipe en bruto lado a lado, y señala por articulación y tramo dónde el esqueleto está mal colocado o la articulación no se ve. No da ángulos: nuestro código quita esos puntos y rellena solo los huecos de menos de 1 s. Aporta también el contexto.</p>
         </div>
       </div>
       <div class="controls">

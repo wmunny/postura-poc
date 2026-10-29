@@ -1,12 +1,14 @@
 import { APP_VERSION, CONFIG, FILTROS, GEMINI } from './config.js';
 import { analyzeVideo } from './pose.js';
+import { makeSkeletonVideos } from './overlay-video.js';
+import { seriesMetrics, overlap } from './metrics.js';
 import { ANGLE_DEFS, GROUPS, computeSeries, anglesForFrame, stats } from './angles.js';
 import { RAZONES } from './filters.js';
 import { AngleChart } from './charts.js';
 import { drawOverlay, Viewer3D } from './render.js';
-import { exportAnglesCSV, exportLandmarksCSV, exportJSON } from './export.js';
+import { exportAnglesCSV, exportLandmarksCSV, exportJSON, downloadBlob, baseName } from './export.js';
 import { setApiKey, hasApiKey } from './gemini.js';
-import { runB, runC, viewB, viewC, argonFrames, argonPoseAt } from './argon.js';
+import { runB, runC, viewB, viewC, argonFrames, argonPoseAt, PUNTOS, VEREDICTOS } from './argon.js';
 
 const $ = (s) => document.querySelector(s);
 const video = $('#video');
@@ -20,19 +22,27 @@ const state = {
   meta: null,
   mode: '2d',
   smooth: 5,
-  filtros: true,
-  scenario: 'A',
-  views: {},          // A, B, C: { times, series, ... }
+  scenario: 'A0',
+  views: {},          // A0 (bruto), A1 (filtros mecánicos), B, C: { times, series, ... }
   argon: { B: null, C: null },
   argonPoses: null,   // puntos 2D de Argon (escenario B) con el formato de MediaPipe
+  videos: null,       // { ladoALado, superpuesto }: vídeos con el esqueleto de MediaPipe en bruto
+  videoJob: null,
+  videoAbort: null,
   computed: null,     // vista activa
   charts: [],
   abort: null,
   argonAbort: null,
 };
 
-const SCENARIO_NAMES = { A: 'A · MediaPipe', B: 'B · Argon solo', C: 'C · Mixto' };
+const SCENARIO_NAMES = { A0: 'A · Bruto', A1: 'A · Filtros mecánicos', B: 'B · Argon solo', C: 'C · Argon revisor' };
 const LABEL = Object.fromEntries(ANGLE_DEFS.map((d) => [d.id, d.label]));
+// codo_izq -> «Codo izq.»
+const PUNTO_LABEL = Object.fromEntries(Object.keys(PUNTOS).map((k) => {
+  const [n, s] = k.split('_');
+  const name = n === 'muneca' ? 'muñeca' : n;
+  return [k, `${name[0].toUpperCase()}${name.slice(1)} ${s}.`];
+}));
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 $('#app-version').textContent = APP_VERSION;
@@ -79,6 +89,7 @@ function setFile(file) {
   state.url = URL.createObjectURL(file);
   state.frames = null;
   resetArgon();
+  resetVideos();
   $('#file-name').hidden = false;
   $('#file-name').textContent = `${file.name} · ${(file.size / 1e6).toFixed(1)} MB`;
   video.src = state.url;
@@ -128,6 +139,8 @@ $('#btn-analyze').addEventListener('click', async () => {
   $('#progress-bar').style.width = '0%';
   $('#progress-text').textContent = 'Descargando modelo y preparando el motor…';
   setStatus('');
+  resetVideos();
+  let ok = false;
 
   // Mostramos el vídeo durante el análisis: el usuario ve el esqueleto en directo.
   $('#step-results').hidden = false;
@@ -163,6 +176,7 @@ $('#btn-analyze').addEventListener('click', async () => {
     };
     setStatus(`Análisis completado en ${secs.toFixed(1)} s (${delegate}).`);
     showResults();
+    ok = true;
   } catch (err) {
     if (err.name === 'AbortError') setStatus('Análisis cancelado.');
     else {
@@ -177,8 +191,67 @@ $('#btn-analyze').addEventListener('click', async () => {
     $('#stage').classList.remove('busy');
     video.controls = true;
   }
+  if (ok) generateVideos().catch(() => {});
 });
 $('#btn-cancel').addEventListener('click', () => state.abort?.abort());
+
+// ---------- Vídeos con el esqueleto de MediaPipe (para Argon y para descargar) ----------
+function videoStatus(msg, isError = false) {
+  const el = $('#video-status');
+  el.textContent = msg;
+  el.classList.toggle('error', isError);
+}
+
+function resetVideos() {
+  state.videoAbort?.abort();
+  state.videos = null;
+  state.videoJob = null;
+  $('#dl-side').disabled = $('#dl-over').disabled = true;
+  videoStatus('');
+}
+
+/** Genera (una sola vez por análisis) los dos vídeos con el esqueleto en bruto. */
+function generateVideos() {
+  if (state.videos) return Promise.resolve(state.videos);
+  if (state.videoJob) return state.videoJob;
+  const frames = state.frames;
+  const ctrl = new AbortController();
+  state.videoAbort = ctrl;
+  state.videoJob = (async () => {
+    $('#stage').classList.add('busy');
+    video.controls = false;
+    $('#btn-run-c').disabled = true;
+    const t0 = performance.now();
+    try {
+      const v = await makeSkeletonVideos(video, frames, {
+        fps: state.meta.fpsAnalizados, signal: ctrl.signal,
+        onProgress: (p) => videoStatus(`Generando los vídeos con el esqueleto de MediaPipe… ${Math.round(p * 100)} %`),
+      });
+      state.videos = v;
+      $('#dl-side').disabled = $('#dl-over').disabled = false;
+      const mb = (b) => (b.size / 1e6).toFixed(1);
+      videoStatus(`Vídeos listos en ${((performance.now() - t0) / 1000).toFixed(0)} s · lado a lado ${mb(v.ladoALado)} MB (es el que revisa Argon en C) · superpuesto ${mb(v.superpuesto)} MB.`);
+      return v;
+    } catch (err) {
+      state.videoJob = null;
+      if (err.name !== 'AbortError') {
+        console.error(err);
+        videoStatus(`No se han podido generar los vídeos: ${err.message || err}`, true);
+      }
+      throw err;
+    } finally {
+      if (state.videoAbort === ctrl) {
+        $('#stage').classList.remove('busy');
+        video.controls = true;
+        $('#btn-run-c').disabled = false;
+        video.currentTime = 0;
+      }
+    }
+  })();
+  return state.videoJob;
+}
+$('#dl-side').addEventListener('click', () => state.videos && downloadBlob(`${baseName(state.meta)}_argon_lado_a_lado.mp4`, state.videos.ladoALado));
+$('#dl-over').addEventListener('click', () => state.videos && downloadBlob(`${baseName(state.meta)}_esqueleto.mp4`, state.videos.superpuesto));
 
 // ---------- 3. Resultados ----------
 function buildCharts() {
@@ -194,44 +267,42 @@ function buildCharts() {
   });
 }
 
+const baseOpts = () => ({ mode: state.mode, width: state.meta.width, height: state.meta.height });
+
 function recompute() {
   if (!state.frames) return;
-  const A = computeSeries(state.frames, {
-    mode: state.mode, width: state.meta.width, height: state.meta.height,
-    smoothWindow: state.smooth, filtros: state.filtros,
-  });
-  state.views = { A };
-  if (state.argon.B) state.views.B = viewB(state.argon.B, A.times, { mode: state.mode, width: state.meta.width, height: state.meta.height });
-  if (state.argon.C) state.views.C = viewC(state.argon.C, A);
-  if (!state.views[state.scenario]) state.scenario = 'A';
+  const A0 = computeSeries(state.frames, { ...baseOpts(), smoothWindow: state.smooth });
+  const A1 = computeSeries(state.frames, { ...baseOpts(), smoothWindow: state.smooth, filtros: true });
+  state.views = { A0, A1 };
+  if (state.argon.B) state.views.B = viewB(state.argon.B, A0.times, baseOpts());
+  if (state.argon.C) state.views.C = viewC(state.argon.C, state.frames, { ...baseOpts(), smoothWindow: state.smooth });
+  if (!state.views[state.scenario]) state.scenario = 'A0';
   document.querySelectorAll('[data-scenario]').forEach((b) => {
     b.classList.toggle('on', b.dataset.scenario === state.scenario);
     b.disabled = !state.views[b.dataset.scenario];
   });
 
   state.computed = state.views[state.scenario];
-  const ghost = state.scenario === 'A' ? A.raw : A.series;
-  state.charts.forEach((c) => c.setData(state.computed.times, state.computed.series, ghost));
+  const ghost = state.scenario === 'A0' ? null : A0.series;
+  const bands = state.scenario === 'C' ? state.computed.bandas : null;
+  state.charts.forEach((c, k) => c.setData(state.computed.times, state.computed.series, ghost, bands?.[GROUPS[k].id]));
   renderGhostNote();
   renderStats();
-  renderFilters(A);
+  renderFilters(A1);
   renderCompare();
   syncToVideo();
 }
 
 function renderGhostNote() {
   const notes = {
-    A: state.filtros ? 'Línea tenue: MediaPipe sin filtrar. Lo que ves por encima es lo que queda tras los filtros.' : '',
+    A0: 'MediaPipe tal como sale: solo se descartan los puntos que el propio MediaPipe da por poco visibles.',
+    A1: 'Línea tenue: MediaPipe en bruto. Lo que ves por encima es lo que queda tras los filtros mecánicos.',
     B: state.mode === '2d'
-      ? 'Línea tenue: escenario A (MediaPipe). En 2D, los ángulos de B se calculan con los puntos que Argon marca en cada fotograma (el esqueleto amarillo del vídeo).'
-      : 'Línea tenue: escenario A (MediaPipe). En 3D, son los ángulos anatómicos que estima Argon directamente.',
-    C: 'Línea tenue: escenario A antes de la revisión de Argon.',
+      ? 'Línea tenue: MediaPipe en bruto. En 2D, los ángulos de B se calculan con los puntos que Argon marca en cada fotograma (el esqueleto amarillo del vídeo).'
+      : 'Línea tenue: MediaPipe en bruto. En 3D, son los ángulos anatómicos que estima Argon directamente.',
+    C: 'Línea tenue: MediaPipe en bruto. Zonas sombreadas: tramos en que Argon ha rechazado algún punto (cruz roja en el vídeo). Los huecos de menos de 1 s se rellenan; los más largos se dejan vacíos.',
   };
-  let note = notes[state.scenario];
-  if (state.scenario === 'C' && state.argon.C && state.argon.C.mode !== state.mode) {
-    note += ` La revisión se hizo con ángulos ${state.argon.C.mode.toUpperCase()}: cambia a ese modo para compararla bien.`;
-  }
-  $('#ghost-note').textContent = note;
+  $('#ghost-note').textContent = notes[state.scenario];
 }
 
 function renderQuality() {
@@ -265,42 +336,58 @@ function renderStats() {
 }
 
 function renderFilters(A) {
-  const keys = state.filtros ? Object.keys(RAZONES) : ['visibilidad'];
+  const keys = Object.keys(RAZONES);
   const head = `<tr><th>Ángulo</th>${keys.map((k) => `<th>${RAZONES[k]}</th>`).join('')}<th>Cobertura final</th></tr>`;
   const rows = ANGLE_DEFS.map((d) => {
     const q = A.quality[d.id];
     return `<tr><td><i class="sw side-${d.side}"></i>${d.label}</td>${keys.map((k) => `<td${q[k] ? '' : ' class="good"'}>${q[k]}</td>`).join('')}<td>${coverage(A.series[d.id])} %</td></tr>`;
   }).join('');
   $('#filters-table').innerHTML = `<thead>${head}</thead><tbody>${rows}</tbody>`;
-  $('#filters-details').querySelector('summary').textContent = state.filtros
-    ? 'Qué han descartado los filtros (escenario A)'
-    : 'Filtros desactivados: solo se descartan los puntos con visibilidad baja';
 }
 
-function meanAbsDiff(a, b) {
-  let s = 0, n = 0;
-  a.forEach((v, i) => { if (v != null && b[i] != null) { s += Math.abs(v - b[i]); n++; } });
-  return n ? s / n : null;
-}
-
+/** Tabla de ganancia: MediaPipe en bruto, con filtros mecánicos y con la revisión de Argon (C). */
 function renderCompare() {
-  const others = ['B', 'C'].filter((k) => state.views[k]);
-  $('#compare').hidden = !others.length;
-  if (!others.length) return;
-  const all = ['A', ...others];
-  const head = `<tr><th>Ángulo</th>${all.map((k) => `<th>Media ${k}</th>`).join('')}${all.map((k) => `<th>P95 ${k}</th>`).join('')}`
-    + `${all.map((k) => `<th>Cobertura ${k}</th>`).join('')}${others.map((k) => `<th>|${k} − A|</th>`).join('')}</tr>`;
-  const rows = ANGLE_DEFS.map((d) => {
-    const s = Object.fromEntries(all.map((k) => [k, state.views[k].series[d.id]]));
-    const st = Object.fromEntries(all.map((k) => [k, stats(s[k])]));
-    return `<tr><td><i class="sw side-${d.side}"></i>${d.label}</td>`
-      + all.map((k) => `<td>${deg(st[k].mean)}</td>`).join('')
-      + all.map((k) => `<td>${deg(st[k].p95)}</td>`).join('')
-      + all.map((k) => `<td>${coverage(s[k])} %</td>`).join('')
-      + others.map((k) => `<td>${deg(meanAbsDiff(s[k], s.A))}</td>`).join('')
-      + '</tr>';
-  }).join('');
-  $('#compare-table').innerHTML = `<thead>${head}</thead><tbody>${rows}</tbody>`;
+  const opts = { ...baseOpts(), smoothWindow: 1 };
+  const S = {
+    bruto: computeSeries(state.frames, opts).series,
+    filtros: computeSeries(state.frames, { ...opts, filtros: true }).series,
+  };
+  if (state.argon.C) S.argon = viewC(state.argon.C, state.frames, opts).series;
+  const cols = Object.keys(S);
+  const NAMES = { bruto: 'Bruto', filtros: 'Filtros', argon: 'Argon' };
+  const times = state.views.A0.times;
+  const n0 = (v) => (v == null ? '—' : v.toFixed(0));
+
+  const rowsData = ANGLE_DEFS.map((d) => {
+    const m = Object.fromEntries(cols.map((k) => [k, seriesMetrics(S[k][d.id], times, d.group)]));
+    const o = S.argon ? overlap(S.bruto[d.id], S.filtros[d.id], S.argon[d.id]) : null;
+    return { d, m, o };
+  });
+  const cell = (m, key, fmt) => cols.map((k) => `<td>${fmt(m[k][key])}</td>`).join('');
+  const row = (label, m, o, cls = '') => `<tr${cls}><td>${label}</td>`
+    + cell(m, 'fluctuacion', n0) + cell(m, 'saltos', String) + cell(m, 'fueraRango', String)
+    + cell(m, 'cobertura', (v) => `${v.toFixed(0)} %`)
+    + (o ? `<td>${o.soloReglas}</td><td>${o.soloArgon}</td><td>${o.ambos}</td>` : '') + '</tr>';
+
+  // Fila de totales: media de fluctuación y cobertura, suma del resto.
+  const mean = (arr) => { const v = arr.filter((x) => x != null); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
+  const tot = Object.fromEntries(cols.map((k) => [k, {
+    fluctuacion: mean(rowsData.map((r) => r.m[k].fluctuacion)),
+    saltos: rowsData.reduce((a, r) => a + r.m[k].saltos, 0),
+    fueraRango: rowsData.reduce((a, r) => a + r.m[k].fueraRango, 0),
+    cobertura: mean(rowsData.map((r) => r.m[k].cobertura)),
+  }]));
+  const totO = S.argon ? ['soloReglas', 'soloArgon', 'ambos'].reduce((acc, k) => ({ ...acc, [k]: rowsData.reduce((a, r) => a + r.o[k], 0) }), {}) : null;
+
+  const sub = cols.map((k) => `<th>${NAMES[k]}</th>`).join('');
+  const head = `<tr><th rowspan="2">Ángulo</th>`
+    + `<th class="grp" colspan="${cols.length}">Fluctuación (°/s)</th><th class="grp" colspan="${cols.length}">Saltos imposibles</th>`
+    + `<th class="grp" colspan="${cols.length}">Fuera de rango</th><th class="grp" colspan="${cols.length}">Cobertura</th>`
+    + (S.argon ? '<th class="grp" colspan="3">Fotogramas tocados</th>' : '') + '</tr>'
+    + `<tr>${sub}${sub}${sub}${sub}${S.argon ? '<th>Solo reglas</th><th>Solo Argon</th><th>Ambos</th>' : ''}</tr>`;
+  const body = rowsData.map((r) => row(`<i class="sw side-${r.d.side}"></i>${r.d.label}`, r.m, r.o)).join('')
+    + row('Total', tot, totO, ' class="total"');
+  $('#compare-table').innerHTML = `<thead>${head}</thead><tbody>${body}</tbody>`;
 }
 
 function frameIndexAt(t) {
@@ -318,7 +405,8 @@ function syncToVideo() {
   const frame = state.frames[i];
   const argon = state.argonPoses && $('#show-argon').checked
     ? argonPoseAt(state.argonPoses, state.argon.B.fps, t) : null;
-  drawOverlay(overlay, video, frame, { showMP: $('#show-mp').checked, argon });
+  const rejected = state.scenario === 'C' ? state.views.C?.rejected[i] : null;
+  drawOverlay(overlay, video, frame, { showMP: $('#show-mp').checked, argon, rejected });
   viewer.setFrame(frame);
   state.charts.forEach((c) => c.setPlayhead(t));
   $('#cur-time').textContent = `· ${t.toFixed(2)} s`;
@@ -362,7 +450,6 @@ document.querySelectorAll('[data-scenario]').forEach((b) => b.addEventListener('
   recompute();
 }));
 $('#smooth').addEventListener('change', (e) => { state.smooth = Number(e.target.value); recompute(); });
-$('#filters').addEventListener('change', (e) => { state.filtros = e.target.checked; recompute(); });
 $('#show-mp').addEventListener('change', syncToVideo);
 $('#show-argon').addEventListener('change', syncToVideo);
 
@@ -377,10 +464,10 @@ function resetArgon() {
   state.argonAbort?.abort();
   state.argon = { B: null, C: null };
   state.argonPoses = null;
+  state.scenario = 'A0';
   $('#show-argon').checked = false;
   $('#show-argon').disabled = true;
   $('#argon-skel-note').textContent = 'Ejecuta el escenario B para ver dónde sitúa Argon cada articulación.';
-  state.scenario = 'A';
   for (const k of ['B', 'C']) { $(`#context-${k}`).hidden = true; $(`#context-${k}`).innerHTML = ''; }
   argonStatus('');
 }
@@ -392,7 +479,7 @@ function tokensOf(u) {
 
 async function runArgon(kind) {
   if (!hasApiKey()) { openKeyDialog(); return; }
-  if (!state.views.A) return;
+  if (!state.views.A0) return;
   state.argonAbort = new AbortController();
   $('#btn-run-b').disabled = $('#btn-run-c').disabled = true;
   $('#btn-argon-cancel').hidden = false;
@@ -406,7 +493,14 @@ async function runArgon(kind) {
   };
   argonStatus('Preparando el vídeo…');
   try {
-    const r = kind === 'B' ? await runB(args) : await runC({ ...args, base: state.views.A, mode: state.mode });
+    let r;
+    if (kind === 'B') r = await runB(args);
+    else {
+      argonStatus('Preparando el vídeo con el esqueleto de MediaPipe…');
+      const v = await generateVideos();
+      const file = new File([v.ladoALado], `${baseName(state.meta)}_argon_lado_a_lado.mp4`, { type: 'video/mp4' });
+      r = await runC({ ...args, file });
+    }
     state.argon[kind] = r;
     if (kind === 'B') showArgonSkeleton(r);
     state.scenario = kind;
@@ -456,14 +550,15 @@ function renderContext(kind) {
   const tok = tokensOf(r.usage);
   let html = `<div class="context">
     <h3>${SCENARIO_NAMES[kind]}</h3>
-    <p class="meta">${r.fps} fotogramas/s · razonamiento ${{ low: 'bajo', medium: 'medio', high: 'alto' }[r.thinking] || esc(r.thinking)} ·${r.segundos.toFixed(0)} s${tok ? ` · ${tok.toLocaleString('es-ES')} tokens` : ''}${kind === 'C' ? ` · revisó ángulos ${r.mode.toUpperCase()}` : ''}</p>
+    <p class="meta">${r.fps} fotogramas/s · razonamiento ${{ low: 'bajo', medium: 'medio', high: 'alto' }[r.thinking] || esc(r.thinking)} · ${r.segundos.toFixed(0)} s${tok ? ` · ${tok.toLocaleString('es-ES')} tokens` : ''}</p>
     <p>${esc(j.resumen)}</p>`;
   if (kind === 'C') {
-    html += `<h4>Tramos revisados</h4>${list(j.revisiones, (x) => `${span(x)} · <strong>${esc(LABEL[x.articulacion] || x.articulacion)}</strong> · ${esc(x.veredicto)}: ${esc(x.motivo)}`, 'Argon no ha encontrado tramos implausibles.')}`;
+    const revs = (j.revisiones || []).slice().sort((a, b) => a.inicio - b.inicio);
+    html += `<h4>Tramos corregidos</h4>${list(revs, (x) => `<span class="xmark">✕</span>${span(x)} · <strong>${esc(PUNTO_LABEL[x.articulacion] || x.articulacion)}</strong> · ${esc(VEREDICTOS[x.veredicto] || x.veredicto)}: ${esc(x.motivo)}`, 'Argon no ha encontrado fallos en el esqueleto.')}`;
     const cam = state.views.C?.cambios;
     if (cam) {
       const sum = (k) => Object.values(cam).reduce((a, b) => a + b[k], 0);
-      html += `<p class="meta">Fotogramas corregidos: ${sum('corregidos')} · descartados: ${sum('descartados')} · dudosos sin corrección: ${sum('dudosos')}</p>`;
+      html += `<p class="meta">Valores de ángulo descartados: ${sum('descartados')} · huecos de menos de 1 s rellenados: ${sum('rellenados')} fotogramas (suma de todas las articulaciones).</p>`;
     }
   }
   html += `<h4>Tarea</h4><p>${esc(c.tarea)}</p>
@@ -472,9 +567,11 @@ function renderContext(kind) {
     <h4>Tronco</h4>
     <p>Torsión:</p>${list(c.torsion_tronco, (x) => `${span(x)}${x.grados_aprox != null ? ` · ~${esc(x.grados_aprox)}°` : ''}`, 'No detectada.')}
     <p>Inclinación lateral:</p>${list(c.inclinacion_lateral_tronco, (x) => `${span(x)}${x.grados_aprox != null ? ` · ~${esc(x.grados_aprox)}°` : ''}`, 'No detectada.')}
-    <h4>Piernas</h4><p>${pretty(c.piernas)}</p>
-    <h4>Oclusiones</h4>${list(j.oclusiones, (x) => `${span(x)} · ${esc((x.articulaciones || []).map((a) => LABEL[a] || a).join(', '))} · ${esc(x.motivo)}`, 'No se han señalado.')}
-    <h4>Observaciones</h4><p>${esc(c.observaciones)}</p>
+    <h4>Piernas</h4><p>${pretty(c.piernas)}</p>`;
+  if (kind === 'B') {
+    html += `<h4>Oclusiones</h4>${list(j.oclusiones, (x) => `${span(x)} · ${esc((x.articulaciones || []).map((a) => LABEL[a] || a).join(', '))} · ${esc(x.motivo)}`, 'No se han señalado.')}`;
+  }
+  html += `<h4>Observaciones</h4><p>${esc(c.observaciones)}</p>
   </div>`;
   const box = $(`#context-${kind}`);
   box.innerHTML = html;
@@ -489,10 +586,10 @@ document.querySelector('.context-grid').addEventListener('click', (e) => {
 $('#exp-angles').addEventListener('click', () => exportAnglesCSV(state.meta, state.computed.times, state.computed.series, `${state.mode}_${state.scenario}`));
 $('#exp-landmarks').addEventListener('click', () => exportLandmarksCSV(state.meta, state.frames));
 $('#exp-json').addEventListener('click', () => exportJSON(state.meta, state.frames, {
-  filtros: state.filtros ? FILTROS : null,
+  filtros: FILTROS,
   escenarios: Object.fromEntries(['B', 'C'].filter((k) => state.argon[k]).map((k) => {
-    const { json, fps, thinking, segundos, mode } = state.argon[k];
-    return [k, { modelo: GEMINI.modelo, fps, razonamiento: thinking, segundos, modo: mode ?? null, respuesta: json }];
+    const { json, fps, thinking, segundos } = state.argon[k];
+    return [k, { modelo: GEMINI.modelo, fps, razonamiento: thinking, segundos, respuesta: json }];
   })),
 }));
 
