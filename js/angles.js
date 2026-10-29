@@ -80,11 +80,11 @@ export const ANGLE_DEFS = [
         needs: [k('sh'), k('el'), L.shL, L.shR, L.hipL, L.hipR],
         fn: (p) => angleBetween(sub(p[k('el')], p[k('sh')]),
           sub(mid(p[L.hipL], p[L.hipR]), mid(p[L.shL], p[L.shR]))),
-        // Eje del tronco con el hombro y la cadera del mismo lado.
-        alts: [{
-          needs: [k('sh'), k('el'), k('hip')],
-          fn: (p) => angleBetween(sub(p[k('el')], p[k('sh')]), sub(p[k('hip')], p[k('sh')])),
-        }],
+        // Eje del tronco con el hombro y la cadera del mismo lado o, si no, con la cadera del otro lado.
+        alts: [k('hip'), L[`hip${s === 'L' ? 'R' : 'L'}`]].map((hip) => ({
+          needs: [k('sh'), k('el'), hip],
+          fn: (p) => angleBetween(sub(p[k('el')], p[k('sh')]), sub(p[hip], p[k('sh')])),
+        })),
       },
       {
         id: `codo_${s}`, group: 'codo', side: s, label: `Codo ${side}`,

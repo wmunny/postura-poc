@@ -120,6 +120,9 @@
         <label class="check"><input type="checkbox" id="show-mp" checked> Esqueleto de MediaPipe</label>
         <label class="check" title="Ejecuta el escenario B para verlo"><input type="checkbox" id="show-argon" disabled> <span class="dash"></span>Esqueleto de Argon</label>
         <p class="micro" id="argon-skel-note">Ejecuta el escenario B para ver dónde sitúa Argon cada articulación.</p>
+        <p class="micro" id="review-legend" hidden>Revisión de Argon (C y D): <span class="xmark">✕</span>se quita ·
+          <span class="ring">◯</span>se conserva como aproximada · <span class="ring dashed">◌</span>en disputa, sin cambios ·
+          <span class="ring swap">◯</span>izquierda y derecha intercambiadas.</p>
       </div>
       <div class="video-dl">
         <button class="btn" id="dl-side" type="button" disabled title="Original y esqueleto de MediaPipe en bruto, lado a lado: lo que revisa Argon en el escenario C">Vídeo para Argon (lado a lado)</button>
@@ -141,6 +144,7 @@
           <button data-mode="2d" class="on" title="Ángulos en el plano de la imagen: como mediría un técnico sobre el vídeo">Ángulos 2D (plano de imagen)</button>
           <button data-mode="3d" title="Ángulos con las coordenadas 3D estimadas por el modelo">Ángulos 3D (estimados)</button>
         </div>
+        <span class="mode-hint" id="mode-hint"></span>
         <label>Suavizado
           <select id="smooth">
             <option value="1">Sin suavizar</option>
@@ -218,7 +222,7 @@
         </div>
         <div class="scenario">
           <h3>C · Argon revisor y D · Reglas + Argon</h3>
-          <p>Argon ve el vídeo con el original y el esqueleto de MediaPipe en bruto lado a lado, y señala por articulación y tramo dónde el esqueleto está mal colocado, la articulación no se ve o la posición es solo aproximada. No da ángulos: nuestro código quita los puntos rechazados, conserva marcados los aproximados y rellena solo los huecos de menos de 1 s. D aplica además los filtros mecánicos. Aporta también el contexto y el riesgo de cada fase.</p>
+          <p>Argon ve el vídeo con el original y el esqueleto de MediaPipe en bruto lado a lado y, con la prueba de lo que ve, señala por articulación y tramo dónde el esqueleto está mal colocado, no se ve, es aproximado o tiene los lados invertidos. No decide: una política fija lo hace. Se quita lo mal colocado y lo que deja de verse más de 1,5 s; las ocultaciones cortas se conservan como aproximadas si las reglas no ven fallo; una inversión de lados solo se aplica si la confirman la profundidad 3D y el consenso de varias ejecuciones. D aplica además los filtros mecánicos. Aporta también el contexto, el riesgo de cada fase y las muñecas.</p>
         </div>
       </div>
       <div class="controls">
@@ -234,6 +238,13 @@
             <option value="low">Bajo · rápido</option>
             <option value="medium" selected>Medio</option>
             <option value="high">Alto · más lento</option>
+          </select>
+        </label>
+        <label>Ejecuciones de C
+          <select id="argon-runs" title="Con varias ejecuciones solo se aplica lo que coincide en la mayoría (y las inversiones de lados, solo con consenso)">
+            <option value="1">1 · más rápida</option>
+            <option value="2">2 · consenso de ambas</option>
+            <option value="3" selected>3 · consenso por mayoría</option>
           </select>
         </label>
         <button class="btn primary" id="btn-run-b">Ejecutar B</button>

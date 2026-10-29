@@ -23,7 +23,7 @@ Prueba de concepto de la **Fase 1 (percepción)** de un modelo biomecánico. A p
 | **A · Bruto** | Serie densa de ángulos (10–30 por segundo) tal como sale de MediaPipe | Navegador |
 | **A · Filtros mecánicos** | La misma serie limpiada con reglas fijas de consistencia mecánica | Navegador |
 | **B · Argon solo** | Gemini 4 Argon marca las articulaciones en cada fotograma que muestrea, estima los ángulos 3D y describe el contexto de la tarea | API de Gemini |
-| **C · Argon revisor** | Argon revisa el vídeo con el esqueleto de MediaPipe en bruto y señala dónde está mal colocado, no se ve o es aproximado; el código quita los puntos rechazados y rellena los huecos cortos | Navegador + API de Gemini |
+| **C · Argon revisor** | Argon revisa el vídeo con el esqueleto de MediaPipe en bruto y señala, con pruebas, dónde está mal colocado, no se ve, es aproximado o tiene los lados invertidos; una política fija decide qué se quita, qué se conserva y qué se intercambia | Navegador + API de Gemini |
 | **D · Reglas + Argon** | La revisión de Argon y, después, los filtros mecánicos. Sale de la misma llamada que C | Navegador + API de Gemini |
 
 Si un punto está rechazado o no se ve, los ángulos que lo usan se calculan con el **lado visible** (tronco y elevación del brazo con el hombro y la cadera del mismo lado, cuello con una sola oreja, cadera con el hombro del otro lado).
@@ -38,15 +38,34 @@ En el escenario B, Argon devuelve la posición 2D de 14 articulaciones (orejas, 
 
 En las gráficas, la línea tenue es siempre MediaPipe en bruto. La tabla *Ganancia de la limpieza* compara bruto, filtros mecánicos y Argon.
 
+### Orientación de la cámara: 2D o 3D
+
+Al terminar el análisis, la app mide en cada fotograma la anchura de los hombros frente a la altura del tronco y clasifica la cámara como **de perfil**, **en diagonal** o **de frente o de espaldas**. Si el trabajador sale de perfil la mayor parte del tiempo, recomienda **2D** (el ángulo en el plano de la imagen es fiable); si no, **3D** (la flexión va hacia la cámara y el 2D la acorta). Elige el modo recomendado automáticamente y lo explica junto a los botones de modo. Umbrales en `js/config.js` (`CAMARA`).
+
 ### C · Argon revisor
 
-1. Al terminar el análisis, la app genera **dos vídeos MP4** con el esqueleto de MediaPipe en bruto (WebCodecs y [mp4-muxer](https://github.com/Vanilagy/mp4-muxer), sin salir del navegador). Cada fotograma es un instante analizado por MediaPipe, así que los tiempos cuadran:
+1. **Durante el propio análisis**, la app graba **dos vídeos MP4** con el esqueleto de MediaPipe en bruto (WebCodecs y [mp4-muxer](https://github.com/Vanilagy/mp4-muxer), sin salir del navegador), aprovechando cada salto del vídeo. Cada fotograma es un instante analizado por MediaPipe, así que los tiempos cuadran:
    - **Lado a lado**: original a la izquierda; esqueleto y tiempo a la derecha. Es el que revisa Argon.
    - **Superpuesto**: una sola vista con el esqueleto, para grabar o publicar.
    Los dos se pueden descargar debajo del vídeo.
-2. Al pulsar *Ejecutar C*, el vídeo lado a lado se envía a Gemini 4 Argon. Devuelve, por articulación y tramo, si el esqueleto está **mal colocado**, la articulación **no se ve** o la posición es **aproximada** (desplazada, pero con la postura correcta), con el motivo, y el riesgo de cada fase de la tarea. No da coordenadas ni ángulos.
-3. El código quita los puntos mal colocados o no visibles (cada tramo se amplía medio intervalo de muestreo), conserva marcados los aproximados, recalcula los ángulos, rellena los huecos de menos de 1 s y deja vacíos los más largos. D aplica después los filtros mecánicos.
-4. En el vídeo, los puntos rechazados llevan una **cruz roja** y los aproximados un **anillo ámbar**; en las gráficas, los tramos revisados van **sombreados** en rojo o ámbar.
+2. Al pulsar *Ejecutar C*, el vídeo lado a lado se envía a Gemini 4 Argon (por defecto **tres ejecuciones en paralelo**). Argon devuelve, por articulación y tramo, si el esqueleto está **mal colocado**, la articulación **no se ve**, la posición es **aproximada** o tiene el **lado invertido**, con el motivo y la **prueba** que ve en la imagen original; además, las fases de la tarea con su riesgo, las muñecas y el contexto. No da coordenadas ni ángulos.
+3. **Argon no decide: una política fija lo hace** (`js/review-policy.js`, umbrales en `POLITICA` de `js/config.js`):
+
+   | Lo que dice Argon | Qué se hace |
+   |---|---|
+   | Mal colocada | Se quita |
+   | No visible más de 1,5 s | Se quita (ocultación larga: MediaPipe se inventa el punto) |
+   | No visible hasta 1,5 s | Se conserva como aproximada, salvo en los fotogramas en que las reglas mecánicas detectan un fallo (ocultación corta: el lado lejano durante un giro) |
+   | Aproximada | Se conserva marcada |
+   | Lado invertido | Se intercambian izquierda y derecha **solo** si la profundidad 3D de MediaPipe lo confirma **y** hay al menos 2 ejecuciones; si no, queda **en disputa** y no se toca |
+   | Varias ejecuciones | **Consenso**: solo se aplica lo que apoya la mayoría (1 de 1, 2 de 2, 2 de 3). Se muestra el acuerdo entre ejecuciones |
+
+4. Con lo que queda se recalculan los ángulos (con el lado visible si falta uno), se rellenan los huecos de menos de 1 s y se dejan vacíos los más largos. D aplica después los filtros mecánicos.
+5. En el vídeo: **cruz roja** (se quita), **anillo ámbar** (aproximada), **anillo ámbar discontinuo** (en disputa) y **anillo morado** (lados intercambiados). En las gráficas, los tramos van sombreados en rojo, ámbar o morado. La tarjeta de C lista cada tramo con la decisión, el motivo y la prueba.
+
+### Instrucciones de Argon
+
+Están en `prompts/argon-revisor.md` (escenario C) y `prompts/argon-solo.md` (escenario B), en texto legible, para revisarlas y ajustarlas **sin tocar el código**: definiciones de cada veredicto, cómo razonar la lateralidad, fases sin huecos, muñecas y criterios de los métodos (postura estática = más de 1 minuto, repetición = más de 4 por minuto, niveles de agarre). Los comentarios `<!-- -->` no se envían y `{{CLAVE}}` se sustituye automáticamente.
 
 ### Muñecas (estimación de Argon)
 
@@ -84,12 +103,12 @@ Un semáforo dice si lo que se ve es **representativo** de la tarea, sobre la me
 | # | Comprobación | Pregunta |
 |---|---|---|
 | 1 | Cobertura | ¿Cuánto se ve de verdad? |
-| 2 | Cobertura por fase (las de Argon, o 5 tramos iguales) | ¿Falta alguna fase? Perder una fase de riesgo alto es rojo |
-| 3 | Muestra efectiva (tiempo de decorrelación) y margen de error | ¿Hay observaciones independientes suficientes para el % de tiempo en postura de riesgo? (muestreo del trabajo) |
+| 2 | Cobertura por fase (las de Argon, sin huecos y uniendo las de menos de 1 s; o 5 tramos iguales) | ¿Falta alguna fase? Ponderada por su riesgo: perder una fase de riesgo alto es rojo; medio, ámbar; bajo, solo aviso |
+| 3 | Muestra efectiva (tiempo de decorrelación) y margen de error | **Duración**: ¿hay observaciones independientes suficientes para el % de tiempo en postura de riesgo? Solo cuenta para OWAS y se muestra aparte (el documento de OWAS: 100 observaciones, error del 10 %; 20–40 min) |
 | 4 | Peor y mejor caso | ¿Cambia la conclusión si lo que no se ve estuviera todo, o nada, en postura de riesgo? |
 | 5 | Pico | ¿Puede estar oculta la peor postura en un hueco largo? |
 
-El veredicto se da por **método**: REBA y RULA (peor postura: 1, 2 y 5) y OWAS (% del tiempo: 1 a 4), y por **región**. En REBA y RULA cuenta también la **muñeca** de Argon: rojo si falta en una fase de riesgo alto, ámbar si falta en otra o solo hay confianza baja; en REBA cuentan los dos lados y en RULA basta con uno (tronco y cuello, piernas, brazo izquierdo, brazo derecho), con consejos de grabación. Las categorías de postura siguen los umbrales de REBA. Todos los umbrales están en `js/config.js` (`VALIDACION`) y son convenciones iniciales a calibrar con un ergónomo.
+El veredicto se da por **método**: REBA y RULA (peor postura: 1, 2 y 5) y OWAS (% del tiempo: 1, 2 y 4, más la **duración** como indicador aparte), y por **región**. En REBA y RULA la **extremidad superior** (hombro, codo y muñeca de Argon) se evalúa en el **lado que mejor se ve**, como en el ejemplo de la NTP 601; la muñeca da rojo si falta en una fase de riesgo alto y ámbar si falta en otra o solo hay confianza baja (tronco y cuello, piernas, brazo izquierdo, brazo derecho), con consejos de grabación. Las categorías de postura siguen los umbrales de REBA. Todos los umbrales están en `js/config.js` (`VALIDACION`) y son convenciones iniciales a calibrar con un ergónomo.
 
 ### Clave de la API de Gemini
 
@@ -165,12 +184,15 @@ js/filters.js         Filtros anti-oclusión
 js/gemini.js          Cliente de la API de Gemini (clave solo en memoria)
 js/argon.js           Escenarios B y C: instrucciones, esquemas de salida y combinación con A
 js/overlay-video.js   Vídeos MP4 con el esqueleto de MediaPipe (lado a lado y superpuesto)
+js/review-policy.js  Política de decisión sobre la revisión de Argon (ocultaciones, lados, consenso)
+js/camera.js          Orientación de la cámara y modo de ángulos recomendado (2D o 3D)
 js/metrics.js         Métricas de estabilidad y coherencia para comparar bruto, reglas, Argon y combinado
 js/validation.js      Validación estadística del vídeo (semáforo por método y por región)
 js/charts.js          Gráficas temporales (canvas, sin dependencias)
 js/render.js          Esqueleto sobre el vídeo y visor 3D
 js/export.js          Exportación CSV y JSON
 docs/LIBRERIAS.md     Análisis de librerías y recomendación por fases
+prompts/              Instrucciones de Gemini 4 Argon (editables sin tocar el código)
 docs/ROADMAP.md       Hoja de ruta hacia la skill de REBA, RULA y OWAS
 docs/articulo/        Hallazgos para un artículo de divulgación
 scripts/              Descarga de dependencias para el modo sin CDN

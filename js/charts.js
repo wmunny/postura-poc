@@ -39,7 +39,8 @@ export class AngleChart {
 
   /**
    * `ghost`: serie de referencia que se dibuja tenue debajo (la serie en bruto).
-   * `bands`: tramos [inicio, fin, tipo] que se sombrean: 'rechazo' (rojo) o 'aprox' (ámbar), de Argon.
+   * `bands`: tramos [inicio, fin, tipo] que se sombrean según la revisión de Argon: 'rechazo' (rojo),
+   * 'aprox' (ámbar: aproximado o en disputa) o 'cambio' (morado: lados intercambiados).
    */
   setData(times, data, ghost = null, bands = null) {
     this.times = times;
@@ -128,7 +129,7 @@ export class AngleChart {
     // Tramos corregidos
     if (this.bands?.length) {
       for (const [a, b, kind] of this.bands) {
-        ctx.fillStyle = css(kind === 'aprox' ? '--band-aprox' : '--band');
+        ctx.fillStyle = css({ aprox: '--band-aprox', cambio: '--band-swap' }[kind] || '--band');
         const x0 = this.tToX(Math.max(0, a)), x1 = this.tToX(Math.min(this.tMax, b));
         ctx.fillRect(x0, this.pad.t, Math.max(2, x1 - x0), h - this.pad.t - this.pad.b);
       }

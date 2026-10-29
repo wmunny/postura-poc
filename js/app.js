@@ -1,6 +1,8 @@
-import { APP_VERSION, CONFIG, FILTROS, GEMINI } from './config.js';
+import { APP_VERSION, CONFIG, FILTROS, GEMINI, POLITICA, VALIDACION } from './config.js';
 import { analyzeVideo } from './pose.js';
-import { makeSkeletonVideos } from './overlay-video.js';
+import { makeSkeletonVideos, createSkeletonRecorder } from './overlay-video.js';
+import { cameraOrientation } from './camera.js';
+import { ACCIONES } from './review-policy.js';
 import { seriesMetrics, overlap, pooledFluctuation } from './metrics.js';
 import { validateVideo, phasesFor } from './validation.js';
 import { ANGLE_DEFS, GROUPS, computeSeries, anglesForFrame, stats } from './angles.js';
@@ -30,7 +32,8 @@ const state = {
   validacion: null,
   wrist: null,        // muñecas de Argon como serie: { L, R } con categorías 0, 1, 2 o null
   wristChart: null,
-  argon: { B: null, C: null },
+  argon: { B: null, C: null }, // C: { runs: [respuestas], fps, thinking, segundos, usage, json (la primera) }
+  camara: null,       // orientación de la cámara y modo recomendado
   argonPoses: null,   // puntos 2D de Argon (escenario B) con el formato de MediaPipe
   videos: null,       // { ladoALado, superpuesto }: vídeos con el esqueleto de MediaPipe en bruto
   videoJob: null,
@@ -155,15 +158,37 @@ $('#btn-analyze').addEventListener('click', async () => {
   const t0 = performance.now();
 
   try {
+    // El vídeo con el esqueleto se graba durante el propio análisis (sin una segunda pasada).
+    let recorder = null;
+    try {
+      recorder = await createSkeletonRecorder(video, { fps });
+    } catch (err) {
+      console.warn('No se puede grabar el vídeo con el esqueleto durante el análisis:', err);
+    }
     const { frames, delegate } = await analyzeVideo(video, {
       model, fps, signal: state.abort.signal,
+      onFrame: async (frame) => {
+        if (!recorder) return;
+        try { await recorder.add(frame); } catch (err) { console.warn(err); recorder = null; }
+      },
       onProgress: ({ done, total, eta, frame }) => {
         $('#progress-bar').style.width = `${(100 * done) / total}%`;
-        $('#progress-text').textContent = `Fotograma ${done} de ${total} · quedan ~${Math.ceil(eta)} s`;
+        $('#progress-text').textContent = `Fotograma ${done} de ${total} · quedan ~${Math.ceil(eta)} s${recorder ? ' · grabando el vídeo con el esqueleto' : ''}`;
         drawOverlay(overlay, video, frame);
         viewer.setFrame(frame);
       },
     });
+    if (recorder) {
+      try {
+        state.videos = await recorder.finish();
+        $('#dl-side').disabled = $('#dl-over').disabled = false;
+        const mb = (b) => (b.size / 1e6).toFixed(1);
+        videoStatus(`Vídeos grabados durante el análisis · lado a lado ${mb(state.videos.ladoALado)} MB (es el que revisa Argon en C) · superpuesto ${mb(state.videos.superpuesto)} MB.`);
+      } catch (err) {
+        console.warn(err);
+        state.videos = null;
+      }
+    }
     const secs = (performance.now() - t0) / 1000;
     state.frames = frames;
     state.meta = {
@@ -197,7 +222,7 @@ $('#btn-analyze').addEventListener('click', async () => {
     $('#stage').classList.remove('busy');
     video.controls = true;
   }
-  if (ok) generateVideos().catch(() => {});
+  if (ok && !state.videos) generateVideos().catch(() => {});
 });
 $('#btn-cancel').addEventListener('click', () => state.abort?.abort());
 
@@ -310,8 +335,11 @@ function recompute() {
   state.wristChart.setData(A0.times, { muneca_L: state.wrist?.L || [], muneca_R: state.wrist?.R || [] });
   renderWrists();
   renderGhostNote();
+  renderModeHint();
+  $('#review-legend').hidden = !(state.scenario === 'C' || state.scenario === 'D');
   renderStats();
   renderFilters(A1);
+  if (state.argon.C) renderContext('C');
   const sinSuavizar = unsmoothedViews();
   renderCompare(sinSuavizar);
   renderValidation(sinSuavizar);
@@ -325,8 +353,8 @@ function renderGhostNote() {
     B: state.mode === '2d'
       ? 'Línea tenue: MediaPipe en bruto. En 2D, los ángulos de B se calculan con los puntos que Argon marca en cada fotograma (el esqueleto amarillo del vídeo).'
       : 'Línea tenue: MediaPipe en bruto. En 3D, son los ángulos anatómicos que estima Argon directamente.',
-    C: 'Línea tenue: MediaPipe en bruto. Sombreado rojo: tramos en que Argon rechaza algún punto (cruz roja en el vídeo); ámbar: posición aproximada (anillo ámbar). Si un lado está rechazado, el ángulo se calcula con el otro. Los huecos de menos de 1 s se rellenan; los más largos se dejan vacíos.',
-    D: 'Línea tenue: MediaPipe en bruto. Primero Argon quita lo inventado (sombreado rojo; ámbar si es aproximado) y después los filtros mecánicos quitan lo imposible. Los huecos de menos de 1 s se rellenan.',
+    C: 'Línea tenue: MediaPipe en bruto. Sombreado rojo: se quita algún punto; ámbar: se conserva como aproximado o en disputa; morado: lados intercambiados. Si un lado está quitado, el ángulo se calcula con el otro. Los huecos de menos de 1 s se rellenan; los más largos se dejan vacíos.',
+    D: 'Línea tenue: MediaPipe en bruto. Primero se aplica la revisión de Argon con su política (rojo: se quita; ámbar: aproximado o en disputa; morado: lados intercambiados) y después los filtros mecánicos quitan lo imposible. Los huecos de menos de 1 s se rellenan.',
   };
   $('#ghost-note').textContent = notes[state.scenario];
 }
@@ -455,6 +483,7 @@ $('#wrists').addEventListener('click', (e) => {
 });
 
 const LIGHT = { verde: 'Verde', ambar: 'Ámbar', rojo: 'Rojo' };
+const OBS_OWAS = VALIDACION.observacionesOWAS;
 const light = (lv, text = LIGHT[lv]) => `<i class="light ${lv}" title="${LIGHT[lv]}"></i>${text}`;
 
 /** Semáforo de validez del vídeo, con la mejor limpieza disponible (D si hay Argon; si no, reglas). */
@@ -472,7 +501,8 @@ function renderValidation(V) {
   $('#validation-methods').innerHTML = val.metodos.map((mt) => `<div class="verdict">
     ${light(mt.nivel, `<b>${mt.id}</b>`)} · ${mt.perspectiva === 'pico' ? 'peor postura' : '% del tiempo'}
     <p>${{ verde: 'El vídeo es representativo para este método.', ambar: 'Utilizable con cautela: revisa los avisos.', rojo: 'No es representativo: lo que no se ve puede cambiar el resultado.' }[mt.nivel]} ${esc(mt.nota)}</p>
-    ${mt.muneca ? `<div class="wrist">Ángulos: ${light(mt.nivelAngulos)} · Muñeca${mt.muneca === 'una' ? ' (basta un lado)' : ''}: ${mt.nivelMuneca ? light(mt.nivelMuneca) : 'sin estimar (ejecuta C)'}</div>` : ''}</div>`).join('');
+    ${mt.extremidadSuperior ? `<div class="wrist">Ángulos: ${light(mt.nivelAngulos)} · Extremidad superior evaluada: ${mt.ladoEvaluado === 'L' ? 'izquierda' : 'derecha'} · Muñeca: ${mt.nivelMuneca ? light(mt.nivelMuneca) : 'sin estimar (ejecuta C)'}</div>` : ''}
+    ${mt.perspectiva === 'tiempo' ? `<div class="wrist">Visibilidad: ${light(mt.nivelAngulos)} · Duración: ${mt.nivelDuracion ? light(mt.nivelDuracion, `${LIGHT[mt.nivelDuracion]} (≈ ${Math.max(1, Math.round(val.duracion.observaciones))} observaciones independientes; pide ${OBS_OWAS})`) : '—'}</div>` : ''}</div>`).join('');
 
   const pc = (x) => (x == null ? '—' : `${x.toFixed(0)} %`);
   const rows = val.regiones.flatMap((reg) => [
@@ -486,7 +516,7 @@ function renderValidation(V) {
       <td class="lv">${light(a.pico)}</td><td class="lv">${light(a.tiempo)}</td></tr>`),
   ]).join('');
   $('#validation-table').innerHTML = `<thead><tr><th>Región / ángulo</th><th>1 · Cobertura</th><th>2 · Fases</th>
-    <th>3 · Muestra</th><th>4 · Extremos (% tiempo en riesgo)</th><th>5 · Pico</th><th>Peor postura</th><th>% del tiempo</th></tr></thead><tbody>${rows}</tbody>`;
+    <th title="Margen de error del % de tiempo en postura de riesgo: mide la duración del vídeo y solo cuenta para OWAS">3 · Muestra (duración)</th><th>4 · Extremos (% tiempo en riesgo)</th><th>5 · Pico</th><th>Peor postura</th><th>% del tiempo</th></tr></thead><tbody>${rows}</tbody>`;
 
   $('#validation-advice').innerHTML = val.consejos.length
     ? val.consejos.map((c) => `<li>${light(c.nivel, `<b>${esc(c.region)}</b>`)}<ul>${c.mensajes.map((x) => `<li>${esc(x)}</li>`).join('')}
@@ -535,17 +565,40 @@ video.addEventListener('play', loop);
 video.addEventListener('seeked', () => { if (!$('#stage').classList.contains('busy')) syncToVideo(); });
 new ResizeObserver(() => { if (state.computed) syncToVideo(); }).observe(overlay);
 
+/** Orientación de la cámara: elige el modo de ángulos recomendado y lo explica. */
+function applyCameraRecommendation() {
+  const c = cameraOrientation(state.frames, state.meta.width, state.meta.height);
+  state.camara = c;
+  setMode(c.recomendado);
+}
+
+function renderModeHint() {
+  const c = state.camara;
+  if (!c) { $('#mode-hint').textContent = ''; return; }
+  const txt = c.n
+    ? `Cámara: de perfil ${c.lateral.toFixed(0)} % · en diagonal ${c.oblicua.toFixed(0)} % · de frente o de espaldas ${c.frontal.toFixed(0)} % de los fotogramas. Recomendado: <b>${c.recomendado.toUpperCase()}</b>${c.recomendado === '2d' ? ' (de perfil, el ángulo en el plano de la imagen es fiable)' : ' (la flexión va hacia la cámara y el 2D la acorta)'}.`
+    : 'No se ha podido estimar la orientación de la cámara.';
+  $('#mode-hint').innerHTML = txt + (c.n && state.mode !== c.recomendado
+    ? ` <button class="btn" type="button" id="mode-apply">Usar ${c.recomendado.toUpperCase()}</button>` : '');
+}
+$('#mode-hint').addEventListener('click', (e) => { if (e.target.id === 'mode-apply') { setMode(state.camara.recomendado); recompute(); } });
+
+function setMode(mode) {
+  state.mode = mode;
+  document.querySelectorAll('[data-mode]').forEach((x) => x.classList.toggle('on', x.dataset.mode === mode));
+}
+
 function showResults() {
   buildCharts();
   renderQuality();
+  applyCameraRecommendation();
   recompute();
   $('#step-argon').hidden = false;
   video.currentTime = 0;
 }
 
 document.querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () => {
-  document.querySelectorAll('[data-mode]').forEach((x) => x.classList.toggle('on', x === b));
-  state.mode = b.dataset.mode;
+  setMode(b.dataset.mode);
   recompute();
 }));
 document.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => {
@@ -606,7 +659,19 @@ async function runArgon(kind) {
       argonStatus('Preparando el vídeo con el esqueleto de MediaPipe…');
       const v = await generateVideos();
       const file = new File([v.ladoALado], `${baseName(state.meta)}_argon_lado_a_lado.mp4`, { type: 'video/mp4' });
-      r = await runC({ ...args, file });
+      const n = Number($('#argon-runs').value);
+      let done = 0;
+      const status = () => argonStatus(n > 1
+        ? `Gemini 4 Argon está revisando el esqueleto: ${n} ejecuciones en paralelo para el consenso (${done} terminadas)…`
+        : 'Gemini 4 Argon está revisando el esqueleto de MediaPipe…');
+      status();
+      const runs = await Promise.all(Array.from({ length: n }, () => runC({ ...args, file, onStatus: () => {} })
+        .then((x) => { done++; status(); return x; })));
+      const sumTokens = runs.reduce((a, x) => a + (tokensOf(x.usage) || 0), 0);
+      r = {
+        runs, fps: args.fps, thinking: args.thinking, json: runs[0].json,
+        segundos: Math.max(...runs.map((x) => x.segundos)), usage: sumTokens ? { total_tokens: sumTokens } : null,
+      };
     }
     state.argon[kind] = r;
     if (kind === 'B') showArgonSkeleton(r);
@@ -657,15 +722,22 @@ function renderContext(kind) {
   const tok = tokensOf(r.usage);
   let html = `<div class="context">
     <h3>${SCENARIO_NAMES[kind]}</h3>
-    <p class="meta">${r.fps} fotogramas/s · razonamiento ${{ low: 'bajo', medium: 'medio', high: 'alto' }[r.thinking] || esc(r.thinking)} · ${r.segundos.toFixed(0)} s${tok ? ` · ${tok.toLocaleString('es-ES')} tokens` : ''}</p>
+    <p class="meta">${r.fps} fotogramas/s · razonamiento ${{ low: 'bajo', medium: 'medio', high: 'alto' }[r.thinking] || esc(r.thinking)}${r.runs ? ` · ${r.runs.length} ejecución${r.runs.length > 1 ? 'es' : ''}` : ''} · ${r.segundos.toFixed(0)} s${tok ? ` · ${tok.toLocaleString('es-ES')} tokens` : ''}</p>
     <p>${esc(j.resumen)}</p>`;
   if (kind === 'C') {
-    const revs = (j.revisiones || []).slice().sort((a, b) => a.inicio - b.inicio);
-    html += `<h4>Tramos revisados</h4>${list(revs, (x) => `${x.veredicto === 'aproximada' ? '<span class="ring">◯</span>' : '<span class="xmark">✕</span>'}${span(x)} · <strong>${esc(PUNTO_LABEL[x.articulacion] || x.articulacion)}</strong> · ${esc(VEREDICTOS[x.veredicto] || x.veredicto)}: ${esc(x.motivo)}`, 'Argon no ha encontrado fallos en el esqueleto.')}`;
+    const rev = state.views.C?.revision;
+    if (rev && rev.ejecuciones > 1) {
+      html += `<p class="meta"><b>${rev.ejecuciones} ejecuciones · acuerdo entre ellas: ${rev.acuerdo.toFixed(0)} %</b> de los puntos señalados. Solo se aplica lo que apoya la mayoría. Abajo, los tramos de la primera ejecución.</p>`;
+    } else {
+      html += `<p class="meta">Una sola ejecución: las inversiones de lados no se aplican (hacen falta ${POLITICA.ejecucionesParaIntercambiar} o más).</p>`;
+    }
+    const icon = { borrar: '<span class="xmark">✕</span>', aproximada: '<span class="ring">◯</span>', disputa: '<span class="ring dashed">◌</span>', intercambiar: '<span class="ring swap">◯</span>' };
+    html += `<h4>Tramos revisados y decisión</h4>${list(rev?.decisiones || [], (x) => `${icon[x.accion] || ''}${span(x)} · <strong>${esc(PUNTO_LABEL[x.articulacion] || x.articulacion)}</strong> · ${esc(VEREDICTOS[x.veredicto] || x.veredicto)}: ${esc(x.motivo)}
+      <span class="decision">→ ${esc(ACCIONES[x.accion])} (${esc(x.porque)})</span>${x.evidencia ? `<span class="evid">Prueba: ${esc(x.evidencia)}</span>` : ''}`, 'Argon no ha encontrado fallos en el esqueleto.')}`;
     const cam = state.views.C?.cambios;
     if (cam) {
-      const sum = (k) => Object.values(cam).reduce((a, b) => a + b[k], 0);
-      html += `<p class="meta">Valores de ángulo descartados: ${sum('descartados')} · aproximados: ${sum('aproximados')} · huecos de menos de 1 s rellenados: ${sum('rellenados')} fotogramas (suma de todas las articulaciones).</p>`;
+      const sum = (k) => Object.values(cam).reduce((a, b) => a + (b[k] || 0), 0);
+      html += `<p class="meta">Valores de ángulo quitados: ${sum('descartados')} · aproximados: ${sum('aproximados')} · con lados intercambiados: ${sum('intercambiados')} · huecos de menos de 1 s rellenados: ${sum('rellenados')} fotogramas (suma de todas las articulaciones).</p>`;
     }
   }
   html += `<h4>Tarea</h4><p>${esc(c.tarea)}</p>
@@ -696,13 +768,21 @@ $('#exp-json').addEventListener('click', () => exportJSON(state.meta, state.fram
   filtros: FILTROS,
   validacion: state.validacion && {
     fuente: state.validacion.fuente, modo: state.mode,
-    metodos: state.validacion.metodos.map(({ id, perspectiva, nivel, nivelAngulos, nivelMuneca }) => ({ id, perspectiva, nivel, nivelAngulos, nivelMuneca })),
+    metodos: state.validacion.metodos.map(({ id, perspectiva, nivel, nivelAngulos, nivelMuneca, nivelDuracion, ladoEvaluado }) => ({ id, perspectiva, nivel, nivelAngulos, nivelMuneca, nivelDuracion, ladoEvaluado })),
     angulos: state.validacion.angulos,
     munecas: state.validacion.munecas,
+    duracion: state.validacion.duracion,
+    fases: state.validacion.fases,
   },
+  camara: state.camara,
+  politica: POLITICA,
+  revision: state.views.D?.revision ? {
+    ejecuciones: state.views.D.revision.ejecuciones, acuerdo: state.views.D.revision.acuerdo,
+    decisiones: state.views.D.revision.porEjecucion,
+  } : null,
   escenarios: Object.fromEntries(['B', 'C'].filter((k) => state.argon[k]).map((k) => {
-    const { json, fps, thinking, segundos } = state.argon[k];
-    return [k, { modelo: GEMINI.modelo, fps, razonamiento: thinking, segundos, respuesta: json }];
+    const { json, fps, thinking, segundos, runs } = state.argon[k];
+    return [k, { modelo: GEMINI.modelo, fps, razonamiento: thinking, segundos, respuesta: runs ? runs.map((x) => x.json) : json }];
   })),
 }));
 

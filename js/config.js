@@ -2,7 +2,7 @@
 // Para no depender de CDNs externos (redes corporativas, uso offline), ejecuta
 // `scripts/descargar-dependencias.sh` y pon USE_LOCAL_ASSETS = true.
 
-export const APP_VERSION = '0.6.0';
+export const APP_VERSION = '0.7.0';
 
 const USE_LOCAL_ASSETS = false;
 const TASKS_VISION_VERSION = '1.1.1';
@@ -60,6 +60,20 @@ export const GEMINI = {
   huecoMaximoC_s: 1.0,       // escenario C: huecos más cortos que esto se rellenan por interpolación
 };
 
+// Política de decisión sobre la revisión de Argon (js/review-policy.js).
+export const POLITICA = {
+  ocultacionCorta_s: 1.5,    // «no visible» de hasta esta duración (fin − inicio según Argon): se conserva como aproximada si las reglas no ven fallo
+  profundidadMinima_m: 0.05, // diferencia de profundidad 3D mínima entre lados para confirmar una inversión
+  ejecucionesParaIntercambiar: 2, // con menos ejecuciones de C, una inversión nunca se aplica: queda en disputa
+};
+
+// Orientación de la cámara respecto al trabajador (js/camera.js): anchura de hombros / altura del tronco en la imagen.
+export const CAMARA = {
+  lateral: 0.35,             // por debajo: de perfil (el plano sagital se ve de frente: 2D fiable)
+  frontal: 0.65,             // por encima: de frente o de espaldas (la flexión va hacia la cámara: mejor 3D)
+  minimoLateral: 0.6,        // fracción de fotogramas de perfil para recomendar 2D
+};
+
 // Vídeo con el esqueleto de MediaPipe que revisa Argon en el escenario C (js/overlay-video.js).
 export const VIDEO_ESQUELETO = {
   anchoMaximo: 640,          // ancho máximo de cada mitad del vídeo lado a lado
@@ -83,13 +97,15 @@ export const VALIDACION = {
   ],
   // Métodos: ángulos que necesitan y perspectiva («pico»: peor postura; «tiempo»: proporción de tiempo).
   metodos: [
-    // muneca: 'ambas' (cuentan los dos lados), 'una' (basta con un lado) o null (el método no la usa).
-    { id: 'REBA', perspectiva: 'pico', muneca: 'ambas', angulos: ['tronco', 'cuello', 'rodilla_L', 'rodilla_R', 'hombro_L', 'hombro_R', 'codo_L', 'codo_R'],
-      nota: 'La carga y el agarre los aporta el contexto de Argon o el usuario. La muñeca, por categorías estimadas por Argon (escenario C).' },
-    { id: 'RULA', perspectiva: 'pico', muneca: 'una', angulos: ['tronco', 'cuello', 'hombro_L', 'hombro_R', 'codo_L', 'codo_R'],
-      nota: 'Se puede evaluar solo el lado que se vea bien. La muñeca, por categorías estimadas por Argon (escenario C).' },
-    { id: 'OWAS', perspectiva: 'tiempo', muneca: null, angulos: ['tronco', 'hombro_L', 'hombro_R', 'rodilla_L', 'rodilla_R'],
-      nota: 'Necesita estimar el % del tiempo en cada postura: pide vídeos largos o varios ciclos.' },
+    // extremidadSuperior: 'mejor' = brazo, antebrazo y muñeca del lado que mejor se ve (como en el ejemplo
+    // de la NTP 601: «se analiza sólo la extremidad superior derecha por no ser visible la izquierda»);
+    // null = el método no la evalúa por lados. La muñeca es la estimada por Argon (escenario C).
+    { id: 'REBA', perspectiva: 'pico', extremidadSuperior: 'mejor', angulos: ['tronco', 'cuello', 'rodilla_L', 'rodilla_R'],
+      nota: 'Extremidad superior: la del lado que mejor se ve. La carga y el agarre los aporta el contexto de Argon o el usuario.' },
+    { id: 'RULA', perspectiva: 'pico', extremidadSuperior: 'mejor', angulos: ['tronco', 'cuello'],
+      nota: 'Extremidad superior: la del lado que mejor se ve. La muñeca, por categorías estimadas por Argon (escenario C).' },
+    { id: 'OWAS', perspectiva: 'tiempo', extremidadSuperior: null, angulos: ['tronco', 'hombro_L', 'hombro_R', 'rodilla_L', 'rodilla_R'],
+      nota: 'Estima el % del tiempo en cada postura: además de verse, el vídeo debe durar lo suficiente.' },
   ],
   // Umbrales de categoría (grados) según REBA; el codo es neutro entre 60° y 100°.
   categorias: { tronco: [5, 20, 60], cuello: [20], hombro: [20, 45, 90], codo: [60, 100], rodilla: [30, 60] },
@@ -101,5 +117,10 @@ export const VALIDACION = {
   z: 1.96,
   bandasExposicion: [10, 30],   // % de tiempo en postura de riesgo: < 10, 10–30, > 30
   huecoPico_s: 1,               // huecos más largos que esto pueden ocultar la peor postura
+  solapeCritico_s: 0.5,         // un hueco cuenta como «en fase de riesgo alto» si se solapa con ella al menos esto
   decorrelacionMaxima_s: 10,
+  faseMinima_s: 1,              // las fases de Argon más cortas se unen a la vecina
+  // Duración (solo OWAS): observaciones independientes. Según el documento de OWAS, 100 observaciones
+  // dan un error máximo del 10 % (95 %); suelen hacer falta 20–40 min con muestras cada 30–60 s.
+  observacionesOWAS: 100,
 };

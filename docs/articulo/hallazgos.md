@@ -197,6 +197,25 @@ Conclusiones:
 
 Queda una pregunta que estas pruebas no pueden responder: **¿qué serie se acerca más a la realidad?** Para eso hace falta una referencia medida a mano por un ergónomo en vídeos reales, buenos y malos. Es el siguiente paso.
 
+## 6 quater. La política de decisión, en la práctica
+
+Aplicamos la política propuesta en el veredicto (6 ter) a los veredictos reales que dio Argon en cada vídeo:
+
+| | Taller (vídeo malo) | Paletizado (vídeo bueno) |
+|---|---|---|
+| Cobertura de Reglas + Argon borrando todo lo que Argon señala | 56 % | 71 % |
+| Cobertura de Reglas + Argon **con la política** | 58 % | **99 %** |
+| Semáforo REBA y RULA (ángulos), con la política | 🔴 (los brazos no se ven: correcto) | **🟢** (antes 🔴 en la versión anterior de la app) |
+
+*(Mismo código y mismos datos en las dos filas; solo cambia la política. Taller: 10 fotogramas por segundo, veredictos de la primera ejecución de C.)*
+
+- En el **paletizado**, todas las ocultaciones de Argon eran cortas (el lado lejano durante un giro, de 0 a 1,5 s): ahora se conservan como aproximadas y el resultado vuelve a ser el de un vídeo bueno. OWAS sigue en rojo solo por la **duración** (10 s frente a los 20–40 min que pide el método), que ahora se muestra aparte.
+- En el **taller** casi no cambia, como debe: las ocultaciones largas (un brazo tapado durante 4–7 s de espaldas) se siguen quitando. La política no «aprueba» un vídeo malo.
+- La **inversión de lados falsa** que afirmó Argon en una ejecución: con la nueva política, la profundidad 3D de MediaPipe la contradice y el tramo queda «en disputa» sin borrar datos buenos; y con una sola ejecución nunca se intercambian lados. En una simulación con tres ejecuciones donde solo una afirmaba la inversión, el consenso la descartó.
+- Además, el semáforo evalúa la extremidad superior **en el lado que mejor se ve**, como hace la propia NTP 601 en su ejemplo («se analiza sólo la extremidad superior derecha por no ser visible la izquierda»).
+
+*(Cifras obtenidas reprocesando los veredictos reales de Argon con la política; la nueva versión le pide además pruebas y el lado más cercano a la cámara, así que sus veredictos pueden cambiar.)*
+
 ## 6 bis. Validación estadística del vídeo
 
 La pregunta no es «¿qué porcentaje de fotogramas se ve?», sino **«¿cambiaría la conclusión ergonómica por lo que no se ve?»**:

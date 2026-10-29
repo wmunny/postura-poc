@@ -30,8 +30,9 @@ const sideColor = (s) => (s === 'C' ? css('--skeleton-c') : css(`--side-${s}`));
 /**
  * Esqueletos sobre el vídeo: el de MediaPipe (`frame`) y, si se pasa, el de Argon (`argon`, con
  * el formato de MediaPipe). El de Argon va con líneas discontinuas y articulaciones cuadradas.
- * `rejected` (Map índice → veredicto) marca los puntos que revisa Argon en C y D: cruz roja si los
- * rechaza y anillo ámbar si son aproximados.
+ * `rejected` (Map índice → acción de la política de revisión) marca los puntos que revisa Argon en C y D:
+ * cruz roja si se quitan, anillo ámbar si se conservan como aproximados, anillo ámbar discontinuo si
+ * quedan en disputa y anillo morado si se intercambian izquierda y derecha.
  */
 export function drawOverlay(canvas, video, frame, { showMP = true, argon = null, rejected = null } = {}) {
   const { ctx, w, h } = fitCanvas(canvas);
@@ -66,13 +67,16 @@ function drawMediaPipe(ctx, r, frame, lw) {
 function drawRejected(ctx, r, frame, rejected, lw) {
   const s = lw * 4;
   ctx.globalAlpha = 1;
-  for (const [i, veredicto] of rejected) {
+  for (const [i, accion] of rejected) {
     const x = r.x + frame.lm[i][0] * r.w, y = r.y + frame.lm[i][1] * r.h;
-    if (veredicto === 'aproximada') {
-      for (const [color, width] of [['#000', lw + 3], [css('--warn'), lw + 1]]) {
-        ctx.strokeStyle = color; ctx.lineWidth = width;
+    if (accion !== 'borrar') {
+      const color = accion === 'intercambiar' ? css('--swap') : css('--warn');
+      ctx.setLineDash(accion === 'disputa' ? [lw * 1.5, lw * 1.2] : []);
+      for (const [c, width] of [['#000', lw + 3], [color, lw + 1]]) {
+        ctx.strokeStyle = c; ctx.lineWidth = width;
         ctx.beginPath(); ctx.arc(x, y, s * 0.9, 0, Math.PI * 2); ctx.stroke();
       }
+      ctx.setLineDash([]);
       continue;
     }
     for (const [color, width] of [['#fff', lw * 2 + 2], [css('--danger'), lw * 2]]) {

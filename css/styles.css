@@ -20,6 +20,8 @@
   --warn: #e0a100;      /* puntos aproximados según Argon */
   --band-aprox: rgba(224, 161, 0, 0.16);
   --ok: #2e9e5b;
+  --swap: #9b59d0;      /* lados intercambiados por la revisión */
+  --band-swap: rgba(155, 89, 208, 0.14);
   --warn-bg: #fff4dc;
   --warn-ink: #6b4a00;
   --radius: 12px;
@@ -243,6 +245,12 @@ dialog p { margin: 0 0 8px; }
 .stats th.grp { text-align: center; border-bottom: 1px solid var(--border); }
 .band-key.aprox { background: var(--band-aprox); border-color: var(--warn); }
 .ring { color: var(--warn); font-weight: 700; margin-right: 4px; }
+.ring.swap { color: var(--swap); }
+.ring.dashed { opacity: .85; }
+.mode-hint { font-size: 0.8rem; color: var(--text-secondary); }
+.mode-hint button { margin-left: 6px; padding: 2px 8px; font-size: 0.8rem; }
+.decision { font-size: 0.78rem; color: var(--text-secondary); }
+.evid { display: block; font-size: 0.8rem; color: var(--text-muted); margin-top: 2px; }
 .light { display: inline-block; width: 12px; height: 12px; border-radius: 50%; vertical-align: -1px; margin-right: 6px; border: 1px solid rgba(0,0,0,.25); }
 .light.verde { background: var(--ok); }
 .light.ambar { background: var(--warn); }

@@ -91,10 +91,11 @@ async function makeTrack(Mp4, width, height, fps) {
 }
 
 /**
- * Genera los dos vídeos recorriendo `video` en los instantes de `frames`.
- * @returns {Promise<{ladoALado: Blob, superpuesto: Blob}>}
+ * Grabador de los dos vídeos. Se le pasa cada fotograma ya analizado mientras el <video> está en ese
+ * instante (así se aprovechan los saltos del propio análisis de MediaPipe y no hace falta una segunda pasada).
+ * @returns {Promise<{add(frame): Promise<void>, finish(): Promise<{ladoALado: Blob, superpuesto: Blob}>}>}
  */
-export async function makeSkeletonVideos(video, frames, { fps, onProgress, signal } = {}) {
+export async function createSkeletonRecorder(video, { fps }) {
   if (!('VideoEncoder' in window)) throw new Error('Este navegador no admite WebCodecs. Usa Chrome o Edge recientes.');
   const Mp4 = await import(CONFIG.mp4MuxerUrl);
   const vw = video.videoWidth, vh = video.videoHeight;
@@ -102,30 +103,44 @@ export async function makeSkeletonVideos(video, frames, { fps, onProgress, signa
   const hw = even(vw * k), hh = even(vh * k);
   const k2 = Math.min(1, VIDEO_ESQUELETO.anchoMaximoSuperpuesto / Math.max(vw, vh));
   const ow = even(vw * k2), oh = even(vh * k2);
-
   const side = await makeTrack(Mp4, hw * 2, hh, fps);
   const over = await makeTrack(Mp4, ow, oh, fps);
   const step = 1 / fps;
+  let n = 0;
+  return {
+    async add(f) {
+      const key = n++ % (fps * 2) === 0;
+      side.ctx.drawImage(video, 0, 0, hw, hh);
+      side.ctx.drawImage(video, hw, 0, hw, hh);
+      side.ctx.fillStyle = '#000'; side.ctx.fillRect(hw - 1, 0, 2, hh);
+      drawSkeleton(side.ctx, f, hw, 0, hw, hh);
+      drawTime(side.ctx, f.t, hw + 8, 8, Math.max(14, hh / 26));
+      await side.add(f.t, step, key);
+
+      over.ctx.drawImage(video, 0, 0, ow, oh);
+      drawSkeleton(over.ctx, f, 0, 0, ow, oh);
+      drawTime(over.ctx, f.t, 8, 8, Math.max(14, oh / 30));
+      await over.add(f.t, step, key);
+    },
+    async finish() {
+      return { ladoALado: await side.finish(), superpuesto: await over.finish() };
+    },
+  };
+}
+
+/**
+ * Genera los dos vídeos recorriendo `video` en los instantes de `frames` (segunda pasada: solo se usa
+ * si no se pudieron grabar durante el análisis).
+ * @returns {Promise<{ladoALado: Blob, superpuesto: Blob}>}
+ */
+export async function makeSkeletonVideos(video, frames, { fps, onProgress, signal } = {}) {
+  const rec = await createSkeletonRecorder(video, { fps });
   video.pause();
   for (let i = 0; i < frames.length; i++) {
     if (signal?.aborted) throw new DOMException('Cancelado', 'AbortError');
-    const f = frames[i];
-    await seek(video, f.t);
-    const key = i % (fps * 2) === 0;
-
-    side.ctx.drawImage(video, 0, 0, hw, hh);
-    side.ctx.drawImage(video, hw, 0, hw, hh);
-    side.ctx.fillStyle = '#000'; side.ctx.fillRect(hw - 1, 0, 2, hh);
-    drawSkeleton(side.ctx, f, hw, 0, hw, hh);
-    drawTime(side.ctx, f.t, hw + 8, 8, Math.max(14, hh / 26));
-    await side.add(f.t, step, key);
-
-    over.ctx.drawImage(video, 0, 0, ow, oh);
-    drawSkeleton(over.ctx, f, 0, 0, ow, oh);
-    drawTime(over.ctx, f.t, 8, 8, Math.max(14, oh / 30));
-    await over.add(f.t, step, key);
-
+    await seek(video, frames[i].t);
+    await rec.add(frames[i]);
     if (i % 5 === 0 || i === frames.length - 1) onProgress?.((i + 1) / frames.length);
   }
-  return { ladoALado: await side.finish(), superpuesto: await over.finish() };
+  return rec.finish();
 }

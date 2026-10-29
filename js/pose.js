@@ -66,9 +66,11 @@ const r5 = (n) => Math.round(n * 1e5) / 1e5;
 
 /**
  * Recorre el vídeo a `fps` fotogramas por segundo y devuelve los puntos clave.
+ * `onFrame(frame)` se llama con cada fotograma mientras el vídeo sigue en ese instante (para grabar el
+ * vídeo con el esqueleto sin una segunda pasada).
  * @returns {Promise<{frames: Array, delegate: string}>}
  */
-export async function analyzeVideo(video, { model = 'full', fps = 15, onProgress, signal } = {}) {
+export async function analyzeVideo(video, { model = 'full', fps = 15, onProgress, onFrame, signal } = {}) {
   const { landmarker: lmk, delegate } = await getLandmarker(model);
   const duration = video.duration;
   const step = 1 / fps;
@@ -94,6 +96,7 @@ export async function analyzeVideo(video, { model = 'full', fps = 15, onProgress
       lm: lm ? lm.map((p) => [r5(p.x), r5(p.y), r5(p.z), r5(p.visibility ?? 0)]) : null,
       wlm: wlm ? wlm.map((p) => [r5(p.x), r5(p.y), r5(p.z), r5(p.visibility ?? 0)]) : null,
     });
+    if (onFrame) await onFrame(frames[frames.length - 1]);
 
     if (onProgress && (i % 3 === 0 || i === total - 1)) {
       const elapsed = (performance.now() - t0) / 1000;
